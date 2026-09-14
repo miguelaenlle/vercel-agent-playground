@@ -42,12 +42,12 @@ function Chat({
     <>
       <p>Chat status: {status}</p>
       <p>
-        Sandbox: {conversation.sandboxState}.
+        Conversation state: {conversation.state}.
         {conversation.expiresAt !== null &&
           (conversation.expiresAt > now
             ? ` Runtime remaining: ${Math.ceil((conversation.expiresAt - now) / 1000)} seconds.`
             : ' Runtime deadline reached. Send a message to resume from saved files.')}
-        {conversation.sandboxState === 'active' && ' Heartbeat active.'}
+        {conversation.state === 'waiting_for_agent' && ' Heartbeat active.'}
       </p>
       {messages.map((message) => (
         <article key={message.id}>
@@ -79,9 +79,7 @@ function Chat({
           rows={3}
         />
         <button
-          disabled={
-            busy || !text.trim() || conversation.sandboxState === 'unavailable'
-          }
+          disabled={busy || !text.trim() || conversation.state === 'error'}
         >
           Send
         </button>

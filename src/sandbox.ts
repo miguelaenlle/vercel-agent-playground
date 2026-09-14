@@ -29,13 +29,7 @@ export async function createSandboxAgent(sessionId: string) {
     timeout: 3 * 60_000,
     persistent: true,
     keepLastSnapshots: { count: 1 },
-    ...(VERCEL_TOKEN && VERCEL_TEAM_ID && VERCEL_PROJECT_ID
-      ? {
-          token: VERCEL_TOKEN,
-          teamId: VERCEL_TEAM_ID,
-          projectId: VERCEL_PROJECT_ID,
-        }
-      : {}),
+    ...sandboxCredentials(),
   });
   const agent = new HarnessAgent({
     harness: createCodex({ auth: { OPENAI_API_KEY } }),
@@ -46,4 +40,15 @@ export async function createSandboxAgent(sessionId: string) {
       'Work in the current workspace. Use your native file and shell tools to fulfill requests. Keep replies brief. When changing data, use data.json unless asked otherwise.',
   });
   return { agent, sandbox };
+}
+
+export function sandboxCredentials() {
+  const { VERCEL_TOKEN, VERCEL_TEAM_ID, VERCEL_PROJECT_ID } = process.env;
+  return VERCEL_TOKEN && VERCEL_TEAM_ID && VERCEL_PROJECT_ID
+    ? {
+        token: VERCEL_TOKEN,
+        teamId: VERCEL_TEAM_ID,
+        projectId: VERCEL_PROJECT_ID,
+      }
+    : {};
 }

@@ -44,12 +44,24 @@ Real sandbox execution and restore testing are intentionally manual.
 
 ## Lifecycle
 
-One `liveSandboxes` map and one heartbeat timer per Express process:
+One `liveSandboxes` map and one background lifecycle loop per Express process. The agent path only sets conversation state; the lifecycle manager reads it:
 
-- **Active turn:** every 60 seconds, extend the deadline to at least three minutes from now. This includes harness setup, thinking, and tool execution.
-- **Completed turn:** detach the native harness session, extend the remaining runtime to `SANDBOX_IDLE_MINUTES` (default 10), and stop renewing.
+- **Active turn:** the manager checks locally each second and extends toward three minutes when fewer than two minutes remain. This includes harness setup, thinking, and tool execution.
+- **Completed turn:** detach the native harness session and enter `waiting_for_user`. The manager extends to `waitingSince + SANDBOX_IDLE_MINUTES` (default 10), so repeated checks do not prolong idleness.
 - **Next message:** a native SDK command resumes the sandbox if stopped, then the harness reattaches using its saved resume state.
 - **Server exits:** renewals stop. Vercel stops the sandbox at its existing deadline and persists its filesystem. We never delete the sandbox on idle or shutdown.
+
+The states are a small subset of the [Course agent MVP state machine](https://github.com/PrairieLearn/PrairieLearn/issues/15681):
+
+| State               | Meaning / owner                                                                    |
+| ------------------- | ---------------------------------------------------------------------------------- |
+| `offline`           | New conversation, or the background manager confirmed Vercel stopped its sandbox.  |
+| `starting`          | The request creates/resumes the sandbox and attaches the harness.                  |
+| `waiting_for_agent` | The harness is working; includes thinking, tools, stream draining, and detachment. |
+| `waiting_for_user`  | The request finished successfully; `waitingSince` fixes the idle deadline.         |
+| `error`             | Setup, turn, or lifecycle failure; no further renewals.                            |
+
+Normal path: `offline → starting → waiting_for_agent → waiting_for_user → offline`. A new message from `waiting_for_user` also enters `starting` for harness reattachment. Failures enter `error`. There are no approval, publishing, or sync states in this prototype. Vercel owns snapshotting; we don't invent a `suspending` transition we cannot observe. The background manager checks expired sandboxes with `resume: false` before reporting `offline`.
 
 ```dotenv
 SANDBOX_IDLE_MINUTES=10
@@ -57,7 +69,7 @@ SANDBOX_IDLE_MINUTES=10
 
 Restart Express after changing this setting. No Workflow deployment, `LIFECYCLE_URL`, or `LIFECYCLE_SECRET` is needed. Old lifecycle environment variables are ignored.
 
-`extendTimeout()` only adds time. We calculate the difference from the SDK's `expiresAt`, serialize extensions per sandbox, and display the last acknowledged deadline in the UI. Polling the UI does not renew anything. The countdown reaching zero indicates the expected timeout, not an independently verified stop.
+`extendTimeout()` only adds time. We calculate the difference from the SDK's `expiresAt`, prevent overlapping lifecycle passes, and display the last acknowledged deadline in the UI. Polling the UI does not renew anything. The countdown reaching zero indicates the expected timeout, not an independently verified stop.
 
 An existing deadline cannot be shortened: if a new turn starts soon after a 10-minute idle allowance was granted, it may still have nearly 10 minutes left. Likewise, setting idle time below three minutes cannot shorten the initial active allowance. A failed heartbeat aborts the local turn and stops renewal; no automatic retry loop keeps a failed conversation alive. The five-minute agent turn limit and Vercel's maximum continuous session duration still apply.
 
@@ -66,7 +78,8 @@ Vercel owns filesystem snapshots (`persistent: true`, keeping the latest snapsho
 ## Read the code
 
 - [`src/sandbox.ts`](src/sandbox.ts): create a persistent native `Sandbox`, then give it to the standard Codex harness through `createVercelSandbox({ sandbox })`.
-- [`src/server.ts`](src/server.ts): chat routes, in-memory sessions, one heartbeat loop, and timeout extensions.
+- [`src/server.ts`](src/server.ts): chat routes, in-memory sessions, and agent-owned state transitions.
+- [`src/sandbox-lifecycle.ts`](src/sandbox-lifecycle.ts): background timeout policy and confirmation that idle sandboxes stopped.
 - [`src/client.tsx`](src/client.tsx): `useChat`, raw SDK message parts, and runtime countdown.
 
 ```text

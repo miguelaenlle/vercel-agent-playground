@@ -8,6 +8,7 @@ import {
 } from '@ai-sdk/harness/agent';
 import { createSandboxAgent } from './sandbox.js';
 import { reportError } from './errors.js';
+import { startSandboxLifecycle } from './sandbox-lifecycle.js';
 import {
   consumeStream,
   createUIMessageStream,
@@ -23,7 +24,9 @@ export type Conversation = {
   id: string;
   messages: UIMessage[];
   expiresAt: number | null;
-  sandboxState: 'new' | 'active' | 'idle' | 'unavailable';
+  state:
+    'offline' | 'starting' | 'waiting_for_agent' | 'waiting_for_user' | 'error';
+  waitingSince: number | null;
 };
 
 export function createApp() {
@@ -33,57 +36,21 @@ export function createApp() {
     string,
     { controller: AbortController; done: Promise<void> }
   >();
-  const idleMs =
-    z.coerce
-      .number()
-      .positive()
-      .max(1440)
-      .parse(process.env.SANDBOX_IDLE_MINUTES || 10) * 60_000;
   type Runtime = Awaited<ReturnType<typeof createSandboxAgent>> & {
     session?: HarnessAgentSession;
     resumeFrom?: HarnessAgentResumeSessionState;
-    active: boolean;
-    renewal: Promise<void>;
   };
   const liveSandboxes = new Map<string, Runtime>();
 
-  function renew(
-    id: string,
-    runtime: Runtime,
-    duration: number,
-    heartbeat = false,
-  ) {
-    // Serialize extensions so overlapping calls cannot add the same time twice.
-    runtime.renewal = runtime.renewal
-      .catch(() => {})
-      .then(async () => {
-        if (heartbeat && !runtime.active) return;
-        const deadline = runtime.sandbox.expiresAt?.getTime();
-        if (!deadline || deadline <= Date.now())
-          throw new Error('Sandbox runtime expired.');
-        const extension = Math.ceil(Date.now() + duration - deadline);
-        // Vercel rejects extensions shorter than one second.
-        if (extension >= 1000)
-          await runtime.sandbox.extendTimeout(extension, {
-            signal: AbortSignal.timeout(15_000),
-          });
-        conversations.get(id)!.expiresAt = runtime.sandbox.expiresAt!.getTime();
-      });
-    return runtime.renewal;
-  }
-
-  const heartbeat = setInterval(() => {
-    for (const [id, runtime] of liveSandboxes) {
-      if (!runtime.active) continue;
-      void renew(id, runtime, 3 * 60_000, true).catch((error) => {
-        runtime.active = false;
-        conversations.get(id)!.sandboxState = 'unavailable';
-        running.get(id)?.controller.abort();
-        reportError(`Sandbox heartbeat ${id}`, error);
-      });
-    }
-  }, 60_000);
-  heartbeat.unref();
+  const stopLifecycle = startSandboxLifecycle(
+    conversations,
+    liveSandboxes,
+    (id, error) => {
+      conversations.get(id)!.state = 'error';
+      running.get(id)?.controller.abort();
+      reportError(`Sandbox lifecycle ${id}`, error);
+    },
+  );
   app.use('/api', (req, res, next) => {
     const host = req.get('host');
     if (
@@ -105,7 +72,8 @@ export function createApp() {
       id: crypto.randomUUID(),
       messages: [],
       expiresAt: null,
-      sandboxState: 'new',
+      state: 'offline',
+      waitingSince: null,
     };
     conversations.set(conversation.id, conversation);
     res.json(conversation);
@@ -115,7 +83,7 @@ export function createApp() {
     if (!conversation) return res.status(404).send('Conversation not found.');
     if (running.has(conversation.id))
       return res.status(409).send('A turn is already running.');
-    if (conversation.sandboxState === 'unavailable')
+    if (conversation.state === 'error')
       return res
         .status(409)
         .send('Sandbox unavailable. Start a new conversation.');
@@ -135,7 +103,7 @@ export function createApp() {
     let stage = 'Validating message';
     const onError = (error: unknown) => {
       failed = true;
-      conversation.sandboxState = 'unavailable';
+      conversation.state = 'error';
       reportError(stage, error);
       const message = getHarnessErrorMessage(error);
       return message === 'An error occurred.'
@@ -157,23 +125,19 @@ export function createApp() {
         stream: createUIMessageStream({
           originalMessages: req.body.messages,
           execute: async ({ writer }) => {
+            conversation.state = 'starting';
+            conversation.waitingSince = null;
             let runtime = liveSandboxes.get(conversation.id);
             if (!runtime) {
               stage = 'Creating sandbox';
               runtime = {
                 ...(await createSandboxAgent(conversation.id)),
-                active: false,
-                renewal: Promise.resolve(),
               };
               liveSandboxes.set(conversation.id, runtime);
             }
-            conversation.sandboxState = 'active';
             // A command auto-resumes a stopped persistent sandbox before attachment.
             stage = 'Resuming sandbox';
             await runtime.sandbox.runCommand({ cmd: 'true' });
-            stage = 'Extending sandbox timeout';
-            await renew(conversation.id, runtime, 3 * 60_000);
-            runtime.active = true;
             stage = 'Starting Codex';
             runtime.session = await runtime.agent.createSession({
               sessionId: conversation.id,
@@ -181,6 +145,7 @@ export function createApp() {
               abortSignal: controller.signal,
             });
             // The native session owns history; send only this turn's new text.
+            conversation.state = 'waiting_for_agent';
             stage = 'Running Codex';
             const result = await runtime.agent.stream({
               session: runtime.session,
@@ -209,27 +174,23 @@ export function createApp() {
         await drain;
         const runtime = liveSandboxes.get(conversation.id);
         if (runtime) {
-          runtime.active = false;
           if (runtime.session && !runtime.session.hasUnfinishedTurn()) {
             stage = 'Saving Codex session';
             runtime.resumeFrom = await runtime.session.detach();
             runtime.session = undefined;
             if (!failed && !controller.signal.aborted) {
-              stage = 'Extending idle timeout';
-              await renew(conversation.id, runtime, idleMs);
-              conversation.sandboxState = 'idle';
+              conversation.waitingSince = Date.now();
+              conversation.state = 'waiting_for_user';
             } else {
-              conversation.sandboxState = 'unavailable';
+              conversation.state = 'error';
             }
           } else {
-            conversation.sandboxState = 'unavailable';
+            conversation.state = 'error';
           }
         }
       } catch (error) {
         reportError(stage, error);
-        const runtime = liveSandboxes.get(conversation.id);
-        if (runtime) runtime.active = false;
-        conversation.sandboxState = 'unavailable';
+        conversation.state = 'error';
       } finally {
         running.delete(conversation.id);
         finish();
@@ -248,8 +209,7 @@ export function createApp() {
   return {
     app,
     close: async () => {
-      clearInterval(heartbeat);
-      for (const runtime of liveSandboxes.values()) runtime.active = false;
+      stopLifecycle();
       const turns = [...running.values()];
       for (const { controller } of turns) controller.abort();
       await Promise.all(turns.map(({ done }) => done));
