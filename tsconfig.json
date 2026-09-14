@@ -11,5 +11,5 @@
     "esModuleInterop": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["src", "tests", "*.ts", "lifecycle"]
+  "include": ["src", "tests", "*.ts"]
 }

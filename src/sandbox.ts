@@ -1,8 +1,9 @@
 import { HarnessAgent, HarnessError } from '@ai-sdk/harness/agent';
 import { createCodex } from '@ai-sdk/harness-codex';
-import { sandboxProvider } from './sandbox-provider.js';
+import { createVercelSandbox } from '@ai-sdk/sandbox-vercel';
+import { Sandbox } from '@vercel/sandbox';
 
-export function createSandboxAgent() {
+export async function createSandboxAgent(sessionId: string) {
   const {
     OPENAI_API_KEY,
     VERCEL_TOKEN,
@@ -21,12 +22,28 @@ export function createSandboxAgent() {
         'Set VERCEL_TOKEN, VERCEL_TEAM_ID, and VERCEL_PROJECT_ID (or VERCEL_OIDC_TOKEN) in .env.local.',
     });
   }
-  return new HarnessAgent({
+  const sandbox = await Sandbox.create({
+    name: sessionId,
+    runtime: 'node24',
+    ports: [4000],
+    timeout: 3 * 60_000,
+    persistent: true,
+    keepLastSnapshots: { count: 1 },
+    ...(VERCEL_TOKEN && VERCEL_TEAM_ID && VERCEL_PROJECT_ID
+      ? {
+          token: VERCEL_TOKEN,
+          teamId: VERCEL_TEAM_ID,
+          projectId: VERCEL_PROJECT_ID,
+        }
+      : {}),
+  });
+  const agent = new HarnessAgent({
     harness: createCodex({ auth: { OPENAI_API_KEY } }),
     model: process.env.CODEX_MODEL || 'gpt-5.3-codex',
-    sandbox: sandboxProvider(),
+    sandbox: createVercelSandbox({ sandbox }),
     sandboxConfig: { workDir: 'workspace' },
     instructions:
       'Work in the current workspace. Use your native file and shell tools to fulfill requests. Keep replies brief. When changing data, use data.json unless asked otherwise.',
   });
+  return { agent, sandbox };
 }

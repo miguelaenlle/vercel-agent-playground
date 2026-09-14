@@ -4,9 +4,9 @@ import { resolve } from 'node:path';
 import {
   getHarnessErrorMessage,
   type HarnessAgentSession,
+  type HarnessAgentResumeSessionState,
 } from '@ai-sdk/harness/agent';
 import { createSandboxAgent } from './sandbox.js';
-import { startLifecycle } from './lifecycle.js';
 import {
   consumeStream,
   createUIMessageStream,
@@ -21,7 +21,7 @@ import { z } from 'zod';
 export type Conversation = {
   id: string;
   messages: UIMessage[];
-  idleDeadline: number | null;
+  expiresAt: number | null;
   sandboxState: 'new' | 'active' | 'idle' | 'unavailable';
 };
 
@@ -32,14 +32,56 @@ export function createApp() {
     string,
     { controller: AbortController; done: Promise<void> }
   >();
-  const sandboxes = new Map<
-    string,
-    {
-      agent: ReturnType<typeof createSandboxAgent>;
-      session: HarnessAgentSession;
-      lifecycle: Awaited<ReturnType<typeof startLifecycle>>;
+  const idleMs =
+    z.coerce
+      .number()
+      .positive()
+      .max(1440)
+      .parse(process.env.SANDBOX_IDLE_MINUTES || 10) * 60_000;
+  type Runtime = Awaited<ReturnType<typeof createSandboxAgent>> & {
+    session?: HarnessAgentSession;
+    resumeFrom?: HarnessAgentResumeSessionState;
+    active: boolean;
+    renewal: Promise<void>;
+  };
+  const liveSandboxes = new Map<string, Runtime>();
+
+  function renew(
+    id: string,
+    runtime: Runtime,
+    duration: number,
+    heartbeat = false,
+  ) {
+    // Serialize extensions so overlapping calls cannot add the same time twice.
+    runtime.renewal = runtime.renewal
+      .catch(() => {})
+      .then(async () => {
+        if (heartbeat && !runtime.active) return;
+        const deadline = runtime.sandbox.expiresAt?.getTime();
+        if (!deadline || deadline <= Date.now())
+          throw new Error('Sandbox runtime expired.');
+        const extension = Math.ceil(Date.now() + duration - deadline);
+        if (extension > 0)
+          await runtime.sandbox.extendTimeout(extension, {
+            signal: AbortSignal.timeout(15_000),
+          });
+        conversations.get(id)!.expiresAt = runtime.sandbox.expiresAt!.getTime();
+      });
+    return runtime.renewal;
+  }
+
+  const heartbeat = setInterval(() => {
+    for (const [id, runtime] of liveSandboxes) {
+      if (!runtime.active) continue;
+      void renew(id, runtime, 3 * 60_000, true).catch(() => {
+        runtime.active = false;
+        conversations.get(id)!.sandboxState = 'unavailable';
+        running.get(id)?.controller.abort();
+        console.error('Sandbox heartbeat failed:', id);
+      });
     }
-  >();
+  }, 60_000);
+  heartbeat.unref();
   app.use('/api', (req, res, next) => {
     const host = req.get('host');
     if (
@@ -60,7 +102,7 @@ export function createApp() {
     const conversation: Conversation = {
       id: crypto.randomUUID(),
       messages: [],
-      idleDeadline: null,
+      expiresAt: null,
       sandboxState: 'new',
     };
     conversations.set(conversation.id, conversation);
@@ -103,27 +145,25 @@ export function createApp() {
         stream: createUIMessageStream({
           originalMessages: req.body.messages,
           execute: async ({ writer }) => {
-            let runtime = sandboxes.get(conversation.id);
+            let runtime = liveSandboxes.get(conversation.id);
             if (!runtime) {
-              const sessionId = conversation.id;
-              const agent = createSandboxAgent();
-              const lifecycle = await startLifecycle(sessionId);
-              try {
-                const session = await agent.createSession({
-                  sessionId,
-                  abortSignal: controller.signal,
-                });
-                runtime = { agent, session, lifecycle };
-                sandboxes.set(conversation.id, runtime);
-              } catch (error) {
-                await lifecycle.activity(false);
-                throw error;
-              }
-            } else {
-              await runtime.lifecycle.activity(true);
+              runtime = {
+                ...(await createSandboxAgent(conversation.id)),
+                active: false,
+                renewal: Promise.resolve(),
+              };
+              liveSandboxes.set(conversation.id, runtime);
             }
             conversation.sandboxState = 'active';
-            conversation.idleDeadline = null;
+            // A command auto-resumes a stopped persistent sandbox before attachment.
+            await runtime.sandbox.runCommand({ cmd: 'true' });
+            await renew(conversation.id, runtime, 3 * 60_000);
+            runtime.active = true;
+            runtime.session = await runtime.agent.createSession({
+              sessionId: conversation.id,
+              resumeFrom: runtime.resumeFrom,
+              abortSignal: controller.signal,
+            });
             // The native session owns history; send only this turn's new text.
             const result = await runtime.agent.stream({
               session: runtime.session,
@@ -154,16 +194,25 @@ export function createApp() {
     } finally {
       try {
         await drain;
-        const runtime = sandboxes.get(conversation.id);
-        if (runtime && !runtime.session.hasUnfinishedTurn()) {
-          const { idleDeadline } = await runtime.lifecycle.activity(false);
-          conversation.idleDeadline = idleDeadline;
-          conversation.sandboxState = failed ? 'unavailable' : 'idle';
-        } else if (runtime) {
-          // A disconnected stream alone does not prove the agent is idle.
-          conversation.sandboxState = 'unavailable';
+        const runtime = liveSandboxes.get(conversation.id);
+        if (runtime) {
+          runtime.active = false;
+          if (runtime.session && !runtime.session.hasUnfinishedTurn()) {
+            runtime.resumeFrom = await runtime.session.detach();
+            runtime.session = undefined;
+            if (!failed && !controller.signal.aborted) {
+              await renew(conversation.id, runtime, idleMs);
+              conversation.sandboxState = 'idle';
+            } else {
+              conversation.sandboxState = 'unavailable';
+            }
+          } else {
+            conversation.sandboxState = 'unavailable';
+          }
         }
       } catch {
+        const runtime = liveSandboxes.get(conversation.id);
+        if (runtime) runtime.active = false;
         conversation.sandboxState = 'unavailable';
       } finally {
         running.delete(conversation.id);
@@ -182,6 +231,8 @@ export function createApp() {
   return {
     app,
     close: async () => {
+      clearInterval(heartbeat);
+      for (const runtime of liveSandboxes.values()) runtime.active = false;
       const turns = [...running.values()];
       for (const { controller } of turns) controller.abort();
       await Promise.all(turns.map(({ done }) => done));

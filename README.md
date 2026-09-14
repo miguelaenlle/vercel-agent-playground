@@ -4,7 +4,7 @@ Minimal React + Express example: the standard Codex harness, one Vercel Sandbox 
 
 ## Run
 
-Requires Node 22.12+ and pnpm 11. Deploy the lifecycle service below before sending a chat message.
+Requires Node 22.12+ and pnpm 11.
 
 ```sh
 pnpm install
@@ -33,85 +33,57 @@ Credentials stay in the ignored `.env.local`. The Codex adapter receives only th
 
 ## Experiment
 
-1. Click **New conversation**.
-2. Send: **Create data.json containing {"items":["one","two","three"]}. Read it with a shell command and show the result.** The first turn provisions the sandbox and starts the stock Codex harness; expect it to take longer.
-3. Send: **Append "four" to data.json, then use Python to print the item count.** It should be 4. The same native session and files are reused.
-4. Create a second sandbox conversation and ask: **Check whether data.json exists. Do not create it.** It should be absent.
-5. Switch back to the first conversation and ask it to read the file again. Inspect the raw tool input/output JSON in the transcript.
-6. Try **Stop** during a longer turn. Completed file edits remain. If the SDK still reports an unfinished turn, the conversation is marked unavailable and idle cleanup stays disarmed.
-7. Let a completed conversation sit idle. The countdown reaches zero, and Workflow deletes its sandbox. Confirm deletion in Vercel; the countdown shows when cleanup is due, not confirmation that the deletion API succeeded. The adapter may retain its reusable bootstrap template/snapshot.
+1. Run `pnpm dev` and open <http://localhost:4310>.
+2. Create a conversation and ask: **Create data.json containing {"items":["one","two"]}.**
+3. Ask it to append another item. Check the raw tool output and the sandbox's runtime countdown.
+4. Wait for the runtime deadline to pass. Vercel stops compute and saves the filesystem automatically.
+5. In the same conversation, ask it to read `data.json`. The SDK resumes the sandbox, and the harness resumes its saved session. Verify that the edits survived.
+6. Create a second conversation to check workspace isolation. Try Stop during a turn; interrupted or failed turns may be marked unavailable and are no longer renewed.
 
-## Workflow idle cleanup
+Real sandbox execution and restore testing are intentionally manual.
 
-The chat server stays local. This repo also builds a small lifecycle service for Vercel using the [official Express + Workflow integration](https://useworkflow.dev/docs/getting-started/express). Vercel runs the durable timer and deletion step. No Redis or database is needed.
+## Lifecycle
 
-1. Import this GitHub repository into a Vercel project (or use `vercel --prod` from this directory). The checked-in `vercel.json` builds the lifecycle service, not the local chat UI. Enable Fluid compute for the project.
-2. Set `LIFECYCLE_SECRET` to the same long random value in Vercel's Production environment and your local `.env.local`. You can generate one with `openssl rand -hex 32`.
-3. Give that deployment access to the sandbox project. If it is the same Vercel project/team, deployment OIDC authentication works automatically. Otherwise set `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and `VERCEL_PROJECT_ID` on the deployment to match your local sandbox credentials. The lifecycle deployment does not need your OpenAI key.
-4. Deploy after setting those environment variables. The production URL must be accessible to the local server without Vercel's login screen. For this prototype, turn off Deployment Protection on the production deployment if needed. The start route requires the shared secret; generated webhook URLs are private bearer credentials and never reach the browser.
-5. Add to `.env.local`:
+One `liveSandboxes` map and one heartbeat timer per Express process:
 
-   ```dotenv
-   LIFECYCLE_URL=https://your-project.vercel.app
-   LIFECYCLE_SECRET=your-generated-secret
-   SANDBOX_IDLE_MINUTES=10
-   ```
+- **Active turn:** every 60 seconds, extend the deadline to at least three minutes from now. This includes harness setup, thinking, and tool execution.
+- **Completed turn:** detach the native harness session, extend the remaining runtime to `SANDBOX_IDLE_MINUTES` (default 10), and stop renewing.
+- **Next message:** a native SDK command resumes the sandbox if stopped, then the harness reattaches using its saved resume state.
+- **Server exits:** renewals stop. Vercel stops the sandbox at its existing deadline and persists its filesystem. We never delete the sandbox on idle or shutdown.
 
-6. Restart `pnpm dev`, then create a new conversation. Use `SANDBOX_IDLE_MINUTES=0.5` for a 30-second experiment. Changes apply to newly created sandboxes.
-
-The lifecycle is deliberately small:
-
-```text
-first turn → start workflow in active state → create sandbox → run Codex
-turn finished and SDK confirms idle → webhook → sleep until idle deadline
-next turn → webhook acknowledges active → run Codex (old sleep cannot delete)
-idle deadline wins → close webhook → delete sandbox in a durable step
+```dotenv
+SANDBOX_IDLE_MINUTES=10
 ```
 
-Thinking, tool execution, and stream draining all count as active. Opening the page or polling status does not reset the timer. Before a later turn starts, Express waits for the workflow's acknowledgment; if cleanup has already won, the turn fails and you create a new conversation. There is no Delete button.
+Restart Express after changing this setting. No Workflow deployment, `LIFECYCLE_URL`, or `LIFECYCLE_SECRET` is needed. Old lifecycle environment variables are ignored.
 
-Once the workflow has acknowledged idle, cleanup survives closing the browser or shutting down Express. If Express crashes during an active turn, or the SDK reports an unfinished turn after an interruption, we cannot prove the agent is inactive: this prototype leaves idle cleanup disarmed. The provider's configured 30-minute runtime timeout is a separate backstop for compute, not an agent-aware idle timer or guaranteed deletion of persistent snapshots. Individual coding turns still have a five-minute timeout.
+`extendTimeout()` only adds time. We calculate the difference from the SDK's `expiresAt`, serialize extensions per sandbox, and display the last acknowledged deadline in the UI. Polling the UI does not renew anything. The countdown reaching zero indicates the expected timeout, not an independently verified stop.
 
-The local conversation/session maps are still in memory. Restarting Express loses the chat list; reconnecting or restoring an expired sandbox is not implemented. Workflow deployment and real sandbox behavior are intentionally left for your manual experiment.
+An existing deadline cannot be shortened: if a new turn starts soon after a 10-minute idle allowance was granted, it may still have nearly 10 minutes left. Likewise, setting idle time below three minutes cannot shorten the initial active allowance. A failed heartbeat aborts the local turn and stops renewal; no automatic retry loop keeps a failed conversation alive. The five-minute agent turn limit and Vercel's maximum continuous session duration still apply.
 
-For lifecycle development only, `LIFECYCLE_SECRET=... pnpm dev:lifecycle` runs it at port 4312; set `LIFECYCLE_URL=http://localhost:4312`. That uses Workflow's local runtime, so it is not a test of Vercel-managed cleanup while your machine is offline.
+Vercel owns filesystem snapshots (`persistent: true`, keeping the latest snapshot). Snapshot storage remains billable after compute stops; default snapshot expiration is 30 days after last use. Express owns the in-memory conversation list and harness resume payload. **Restarting Express loses that metadata and the chat list**, even though the sandbox files persist in Vercel. Recovery across webserver restarts is outside this minimal prototype.
 
 ## Read the code
 
-- [`src/sandbox.ts`](src/sandbox.ts): credentials and `new HarnessAgent({ harness: createCodex(...), sandbox: createVercelSandbox(...) })`.
-- [`src/server.ts`](src/server.ts): Express chat routes and in-memory sessions. Activity is acknowledged before streaming; idle is reported after the full turn drains.
-- [`src/client.tsx`](src/client.tsx): `useChat`, conversation selector, raw SDK message parts, and countdown.
-- [`src/lifecycle.ts`](src/lifecycle.ts): calls the lifecycle service and its private activity webhook.
-- [`lifecycle/workflow.ts`](lifecycle/workflow.ts): the active/idle loop with durable `sleep`.
-- [`lifecycle/steps.ts`](lifecycle/steps.ts): acknowledgments and sandbox deletion.
-- [`lifecycle/server.ts`](lifecycle/server.ts): authenticated workflow start endpoint.
+- [`src/sandbox.ts`](src/sandbox.ts): create a persistent native `Sandbox`, then give it to the standard Codex harness through `createVercelSandbox({ sandbox })`.
+- [`src/server.ts`](src/server.ts): chat routes, in-memory sessions, one heartbeat loop, and timeout extensions.
+- [`src/client.tsx`](src/client.tsx): `useChat`, raw SDK message parts, and runtime countdown.
 
 ```text
-useChat → Express → HarnessAgent.stream({ session, prompt })
-                          ↓
-                  Codex in Vercel Sandbox
-                          ↓
-                   native file/shell tools
-                          ↓
-                  SDK UI stream → useChat
+useChat → Express → HarnessAgent → Codex in a persistent Vercel Sandbox
+              ↓
+       active sandbox map → heartbeat → extendTimeout()
 ```
-
-The live harness session owns coding history. Only the latest user text goes into its next turn. The displayed transcript is saved separately with `onEnd`. Holding the live session in memory avoids detach/resume bookkeeping in this single-process example. There are no custom shell tools, process launchers, event parsers, or sandbox setup scripts.
 
 ## Checks
 
 ```sh
 pnpm build
-pnpm build:lifecycle
 pnpm format:check
 ```
 
-CI checks formatting and the build. Sandbox execution is left to the manual experiment above; there are no mocked agent modes or test servers.
+## References
 
-## References / next phase
-
-- [AI SDK agents](https://ai-sdk.dev/docs/agents/building-agents)
 - [HarnessAgent UI integration](https://ai-sdk.dev/v7/docs/ai-sdk-harnesses/ui)
-- [Codex adapter](https://ai-sdk.dev/providers/ai-sdk-harnesses/codex)
-- [Vercel sandboxed coding agent guide](https://vercel.com/kb/guide/sandboxed-coding-agent-with-harnessagent)
-- [PLAN.md](PLAN.md): phase 3 prepares a fixed PrairieLearn course checkout before coding starts.
+- [Vercel persistence](https://vercel.com/docs/sandbox/concepts/persistent-sandboxes)
+- [PLAN.md](PLAN.md): the prepared-course phase remains separate.

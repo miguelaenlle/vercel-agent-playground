@@ -43,13 +43,11 @@ function Chat({
       <p>Chat status: {status}</p>
       <p>
         Sandbox: {conversation.sandboxState}.
-        {busy || conversation.sandboxState === 'active'
-          ? ' Idle timer paused while the agent is running (including thinking).'
-          : conversation.idleDeadline !== null
-            ? conversation.idleDeadline > now
-              ? ` Idle cleanup in ${Math.ceil((conversation.idleDeadline - now) / 1000)} seconds.`
-              : ' Idle limit reached; Workflow cleanup is due.'
-            : ''}
+        {conversation.expiresAt !== null &&
+          (conversation.expiresAt > now
+            ? ` Runtime remaining: ${Math.ceil((conversation.expiresAt - now) / 1000)} seconds.`
+            : ' Runtime deadline reached. Send a message to resume from saved files.')}
+        {conversation.sandboxState === 'active' && ' Heartbeat active.'}
       </p>
       {messages.map((message) => (
         <article key={message.id}>

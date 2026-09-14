@@ -8,9 +8,9 @@ Uses the standard Codex harness through pinned AI SDK harness and Vercel Sandbox
 
 - Create one real Vercel Sandbox per conversation, lazily on its first prompt.
 - Use the standard harness's file, shell, editing, and search tools.
-- Keep the live native session in the Express process and reuse it on later turns. UI messages display history; they are not a substitute for native session continuation. Detach/resume persistence is deferred to keep the code minimal.
+- Keep native resume state in the Express process; detach after each completed turn and reattach for the next. Vercel persists sandbox files. Webserver restart recovery remains deferred.
 - Inspect native tool outputs when asking the harness to read workspace files. A separate file browser is deferred.
-- Stop generation on cancellation; use Vercel Workflow for idle deletion and retain a separate provider runtime limit.
+- Stop generation on cancellation; renew active sandbox timeouts through one loop per webserver, grant an idle allowance after completed turns, and let Vercel stop and snapshot expired sessions.
 
 Use real Vercel credentials for Sandbox and direct OpenAI credentials for the model. AI Gateway remains optional. Keep provider credentials outside the sandbox using the adapter's supported network transformations.
 
@@ -42,11 +42,11 @@ Static JSON/Python checks do not prove PrairieLearn rendering or grading. Add va
 | Coding bridge, native event conversion, session attachment | Harness adapters                                          |
 | Setup hooks                                                | SDK adapter; application supplies the fixed setup profile |
 | Conversation list, transcript retention, metadata          | Express application                                       |
-| Agent-aware idle policy                                    | Application workflow code                                 |
-| Durable idle waiting and deletion-step execution           | Vercel Workflow                                           |
+| Active/idle timeout policy                                 | Express application                                       |
+| Expiration and filesystem persistence                      | Vercel Sandbox                                            |
 | Restart recovery and durable execution                     | Deferred                                                  |
 
-Idle cleanup now uses a hosted Workflow; deployment and live verification remain manual. Moving agent turns themselves into Workflow can replace request-bound execution if durable continuation becomes the next goal. An in-memory map cannot supply durable session lookup for stateless hosted functions. Avoid adding custom stream buffers, watchdogs, or recovery coordinators to the initial experiment.
+Sandbox runtime deadlines now provide cleanup when the webserver goes away. Live verification remains manual. An in-memory map cannot supply durable session lookup for stateless hosted functions. Avoid adding custom stream buffers, watchdogs, or recovery coordinators to the initial experiment.
 
 ## References
 
