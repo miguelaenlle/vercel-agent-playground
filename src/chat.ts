@@ -54,7 +54,6 @@ export async function streamConversation({
       return;
     }
 
-    conversation.waitingSince = Date.now();
     conversation.state = 'waiting_for_user';
   }
 
@@ -65,7 +64,6 @@ export async function streamConversation({
         originalMessages: messages,
         execute: async ({ writer }) => {
           conversation.state = 'starting';
-          conversation.waitingSince = null;
           let runtime = liveSandboxes.get(conversation.id);
           if (!runtime) {
             stage = 'Creating sandbox';

@@ -50,7 +50,6 @@ export function createApp() {
       messages: [],
       expiresAt: null,
       state: 'offline',
-      waitingSince: null,
     };
     conversations.set(conversation.id, conversation);
     res.json(conversation);

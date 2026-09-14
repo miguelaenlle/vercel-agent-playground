@@ -47,7 +47,7 @@ Real sandbox execution and restore testing are intentionally manual.
 One `liveSandboxes` map and one background lifecycle loop per Express process. The agent path only sets conversation state; the lifecycle manager reads it:
 
 - **Active turn:** the manager checks locally each second and extends toward three minutes when fewer than two minutes remain. This includes harness setup, thinking, and tool execution.
-- **Completed turn:** detach the native harness session and enter `waiting_for_user`. The manager extends to `waitingSince + SANDBOX_IDLE_MINUTES` (default 10), so repeated checks do not prolong idleness.
+- **Completed turn:** detach the native harness session and enter `waiting_for_user`. When the manager first observes the transition into `waiting_for_user`, it extends toward now + `SANDBOX_IDLE_MINUTES` (default 10). Further idle checks do nothing.
 - **Next message:** a native SDK command resumes the sandbox if stopped, then the harness reattaches using its saved resume state.
 - **Server exits:** renewals stop. Vercel stops the sandbox at its existing deadline and persists its filesystem. We never delete the sandbox on idle or shutdown.
 
@@ -58,7 +58,7 @@ The states are a small subset of the [Course agent MVP state machine](https://gi
 | `offline`           | New conversation, or the background manager confirmed Vercel stopped its sandbox.  |
 | `starting`          | The request creates/resumes the sandbox and attaches the harness.                  |
 | `waiting_for_agent` | The harness is working; includes thinking, tools, stream draining, and detachment. |
-| `waiting_for_user`  | The request finished successfully; `waitingSince` fixes the idle deadline.         |
+| `waiting_for_user`  | The request finished successfully; the manager grants one idle allowance.          |
 | `error`             | Setup, turn, or lifecycle failure; no further renewals.                            |
 
 Normal path: `offline → starting → waiting_for_agent → waiting_for_user → offline`. A new message from `waiting_for_user` also enters `starting` for harness reattachment. Failures enter `error`. There are no approval, publishing, or sync states in this prototype. Vercel owns snapshotting; we don't invent a `suspending` transition we cannot observe. The background manager checks expired sandboxes with `resume: false` before reporting `offline`.
@@ -66,6 +66,8 @@ Normal path: `offline → starting → waiting_for_agent → waiting_for_user �
 ```dotenv
 SANDBOX_IDLE_MINUTES=10
 ```
+
+The manager tracks only the previously observed state. Timing is approximate: a whole turn between checks can go unnoticed and keep the previous deadline. No transition timestamps or idle deadlines are maintained by the agent.
 
 Restart Express after changing this setting. No Workflow deployment, `LIFECYCLE_URL`, or `LIFECYCLE_SECRET` is needed. Old lifecycle environment variables are ignored.
 

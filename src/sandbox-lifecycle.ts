@@ -18,12 +18,15 @@ export function startSandboxLifecycle(
       .positive()
       .max(1440)
       .parse(process.env.SANDBOX_IDLE_MINUTES || 10) * 60_000;
+  const previousStates = new Map<string, Conversation['state']>();
   let checking = false;
   let stopped = false;
 
   async function checkSandbox(id: string, sandbox: Sandbox) {
     const conversation = conversations.get(id)!;
     const state = conversation.state;
+    const previousState = previousStates.get(id);
+    previousStates.set(id, state);
     if (state === 'offline' || state === 'error') return;
 
     try {
@@ -37,12 +40,9 @@ export function startSandboxLifecycle(
       }
 
       if (state === 'waiting_for_user') {
-        // Use the transition time so checking an idle conversation never extends its wait.
-        await extendUntil(
-          conversation,
-          sandbox,
-          conversation.waitingSince! + idleMs,
-        );
+        if (previousState !== state) {
+          await extendUntil(conversation, sandbox, Date.now() + idleMs);
+        }
         return;
       }
 
