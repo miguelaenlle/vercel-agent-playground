@@ -44,6 +44,10 @@ Use a fine-grained PAT scoped to that repository with **Contents: Read**. Restar
 
 Try **List the course questions, then make a small wording change to one question and show the Git diff.** The PAT is supplied to Vercel's git source API, not embedded in a clone command or supplied as an agent environment variable.
 
+Live web search is enabled through the Codex adapter's built-in `webSearch: true`; it uses the existing OpenAI authentication. Try **Search the web for PrairieLearn documentation on numerical inputs and cite the source.**
+
+For **git fetch / git pull**, Vercel injects the PAT outside the VM into HTTPS requests for this repository's Git read endpoints. The remote URL contains no credential. `src/git-auth.ts` combines these rules with Codex's OpenAI authentication on creation and resume. Keep the PAT read-only; push authentication is not configured. Try **Run git fetch origin and show git status.** A pull may still require resolving conflicts with local edits.
+
 ## Experiment
 
 1. Run `pnpm dev` and open <http://localhost:4310>.

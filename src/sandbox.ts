@@ -9,6 +9,7 @@ import { createVercelSandbox } from '@ai-sdk/sandbox-vercel';
 import { Sandbox } from '@vercel/sandbox';
 import { tool } from 'ai';
 import { z } from 'zod';
+import { withGitAuth } from './git-auth.js';
 
 export function sandboxActiveRuntimeMs() {
   return (
@@ -76,8 +77,11 @@ export async function createSandboxAgent(sessionId: string) {
       const entries = fs.readdirSync('.');
       const directory = fs.mkdtempSync('course-');
       for (const entry of entries) fs.renameSync(entry, directory + '/' + entry);
+      const { execFileSync } = require('node:child_process');
+      execFileSync('git', ['remote', 'set-url', 'origin', process.argv[1]], { cwd: directory });
       console.log(directory);
     `,
+      COURSE_REPO_URL.replace(/\.git$/, '') + '.git',
     ],
   });
   if (setup.exitCode !== 0) {
@@ -85,9 +89,13 @@ export async function createSandboxAgent(sessionId: string) {
   }
   const workDir = (await setup.stdout()).trim();
   const agent = new HarnessAgent({
-    harness: createCodex({ auth: { OPENAI_API_KEY } }),
+    harness: createCodex({ auth: { OPENAI_API_KEY }, webSearch: true }),
     model: process.env.CODEX_MODEL || 'gpt-5.3-codex',
-    sandbox: createVercelSandbox({ sandbox }),
+    sandbox: withGitAuth(
+      createVercelSandbox({ sandbox }),
+      COURSE_REPO_URL,
+      GITHUB_PAT,
+    ),
     sandboxConfig: { workDir },
     tools: {
       hostPing: tool({

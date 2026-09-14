@@ -8,6 +8,12 @@ export function reportError(stage: string, error: unknown) {
   for (const [name, value] of Object.entries(process.env)) {
     if (value && /KEY|TOKEN|SECRET|PASSWORD|(?:^|_)PAT$/i.test(name)) {
       detail = detail.replaceAll(value, '[redacted]');
+      if (name === 'GITHUB_PAT') {
+        detail = detail.replaceAll(
+          Buffer.from(`x-access-token:${value}`).toString('base64'),
+          '[redacted]',
+        );
+      }
     }
   }
   console.error(`${stage}: ${detail}`);
