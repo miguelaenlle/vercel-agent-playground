@@ -8,14 +8,14 @@ React, TypeScript, and one Express server with in-memory conversations. AI SDK `
 
 No AI Gateway, Vercel account, database, sandbox, or custom streaming protocol is required. The app owns an in-memory conversation map, notes tools, and a per-conversation running guard. The client supplies message history; SDK helpers handle streaming. See [README.md](README.md) for setup and experiments.
 
-## Phase 2: agent + chat + sandbox — planned
+## Phase 2: agent + chat + sandbox — implemented; manual verification pending
 
-Introduce the standard Codex harness through AI SDK's harness and Vercel Sandbox adapters. Verify and pin the compatible adapter versions during implementation.
+Uses the standard Codex harness through pinned AI SDK harness and Vercel Sandbox adapters. Sandbox execution has intentionally been left for manual testing.
 
 - Create one real Vercel Sandbox per conversation, lazily on its first prompt.
 - Use the standard harness's file, shell, editing, and search tools.
-- Retain native session resume state on the server and reattach on later turns. UI messages display history; they are not a substitute for native session continuation.
-- Inspect actual workspace files after each turn.
+- Keep the live native session in the Express process and reuse it on later turns. UI messages display history; they are not a substitute for native session continuation. Detach/resume persistence is deferred to keep the code minimal.
+- Inspect native tool outputs when asking the harness to read workspace files. A separate file browser is deferred.
 - Stop generation on cancellation; terminate the sandbox on deletion and bound its maximum lifetime.
 - Keep phase 1 available as the simple baseline.
 

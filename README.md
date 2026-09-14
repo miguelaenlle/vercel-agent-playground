@@ -1,6 +1,11 @@
 # AI SDK experiment
 
-Minimal React + Express example: streaming chat, conversations, and two agent tools that save/read notes in server memory. Uses OpenAI directly; no AI Gateway or Vercel credentials needed for phase 1.
+Minimal React + Express example with two modes:
+
+1. **Chat + notes:** `ToolLoopAgent`, two host tools, notes in memory.
+2. **Codex + sandbox:** `HarnessAgent`, the standard Codex adapter, one Vercel Sandbox per conversation.
+
+Both use OpenAI directly. AI Gateway is not required. Phase 2 is implemented but has not been run against Vercel; sandbox testing is intentionally manual.
 
 ## Run
 
@@ -9,38 +14,63 @@ Requires Node 22.12+ and pnpm 11.
 ```sh
 pnpm install
 cp .env.example .env.local  # Only if .env.local does not already exist.
-# Set OPENAI_API_KEY in .env.local.
+# Add credentials below to .env.local.
 pnpm dev
 ```
 
-Open <http://localhost:4310>. The key needs OpenAI API billing. `OPENAI_MODEL` defaults to `gpt-4.1-mini`. Restart after changing `.env.local`.
+Open <http://localhost:4310>. Choose a mode, then **New conversation**. Restart the server after changing `.env.local`.
 
-1. Click **New conversation** and send **Save my project name as Prairie.**
-2. Inspect the `tool-saveNote` message part and **Server notes** JSON.
-3. Send **Read my notes.**
-4. Create another conversation: its notes are empty. Use the dropdown to return to the first one.
+Phase 1 needs only `OPENAI_API_KEY`, with OpenAI API billing enabled. It defaults to `OPENAI_MODEL=gpt-4.1-mini`.
+
+Phase 2 additionally needs a Vercel project with Sandbox access:
+
+```dotenv
+OPENAI_API_KEY=...
+VERCEL_TOKEN=...
+VERCEL_TEAM_ID=team_...
+VERCEL_PROJECT_ID=prj_...
+CODEX_MODEL=gpt-5.3-codex
+```
+
+Create a [Vercel access token](https://vercel.com/account/tokens) with access to that team. Find the IDs in the team/project settings. `CODEX_MODEL` is a native Codex model name; set it to a Codex-compatible model your API key can access. Do not use the phase-1 chat model for the coding harness.
+
+Alternatively, link a Vercel project with `vercel link` and retrieve `VERCEL_OIDC_TOKEN` with `vercel env pull`. Merge that token into `.env.local` without overwriting your OpenAI key. Local OIDC tokens expire and need refreshing. See [Sandbox authentication](https://vercel.com/docs/sandbox/concepts/authentication).
+
+Credentials stay in the ignored `.env.local`. The Codex adapter receives only the OpenAI key for authentication discovery, avoiding automatic Gateway/subscription selection. The Vercel adapter supports request transformations: Codex receives a placeholder, and the adapter configures injection of the actual OpenAI credential into matching outbound requests. We do not pass the host environment into the VM.
+
+## Phase 2 experiment
+
+1. Select **2: Codex + sandbox**, then **New conversation**.
+2. Send: **Create data.json containing {"items":["one","two","three"]}. Read it with a shell command and show the result.** The first turn provisions the sandbox and starts the stock Codex harness; expect it to take longer.
+3. Send: **Append "four" to data.json, then use Python to print the item count.** It should be 4. The same native session and files are reused.
+4. Create a second sandbox conversation and ask: **Check whether data.json exists. Do not create it.** It should be absent.
+5. Switch back to the first conversation and ask it to read the file again. Inspect the raw tool input/output JSON in the transcript.
+6. Try **Stop** during a longer turn. Completed file edits remain. If the native turn cannot continue after interruption, delete it and start a new conversation.
+7. Click **Delete** after the turn settles; this calls the SDK's `session.destroy()`. You can confirm the session sandbox was removed in Vercel. The adapter may retain its reusable bootstrap template/snapshot.
+
+Sandboxes have a configured 30-minute execution lifetime; individual coding turns have a five-minute timeout. Expired sessions fail visibly and are not silently replaced. Stop cancels generation; it does not destroy the sandbox. Delete when finished. Normal server shutdown destroys known sessions; a crash relies on the provider timeout. Restarting loses the in-memory conversation map. There is no restart recovery or reconnect/replay layer.
 
 ## Read the code
 
-- [`src/server.ts`](src/server.ts): Express, in-memory `Map`, `ToolLoopAgent`, two tools, and `pipeAgentUIStreamToResponse`. Startup is at the bottom.
-- [`src/client.tsx`](src/client.tsx): conversation selector and `useChat` with `DefaultChatTransport`. Text is plain text; tool parts are printed as JSON.
-- [`src/style.css`](src/style.css): basic readability only.
-
-The request path is:
+- [`src/sandbox.ts`](src/sandbox.ts): credentials and `new HarnessAgent({ harness: createCodex(...), sandbox: createVercelSandbox(...) })`.
+- [`src/server.ts`](src/server.ts): Express routes and two in-memory maps. The sandbox branch creates a session once, streams each new prompt, and converts its output with SDK helpers. Delete destroys the session.
+- [`src/client.tsx`](src/client.tsx): `useChat`, mode/conversation selectors, plain text and raw SDK message parts.
 
 ```text
-useChat → DefaultChatTransport → Express → ToolLoopAgent → OpenAI
-                                             ↓
-                                     saveNote / readNotes
-                                             ↓
-                                      conversation.notes
+useChat → Express → HarnessAgent.stream({ session, prompt })
+                          ↓
+                  Codex in Vercel Sandbox
+                          ↓
+                   native file/shell tools
+                          ↓
+                  SDK UI stream → useChat
 ```
 
-AI SDK owns the agent loop, tool execution, message validation/conversion, and streaming format. Express owns the conversation map and tool implementations. `onEnd` saves the SDK transcript; the client refreshes notes after each turn.
+The live harness session owns coding history. Only the latest user text goes into its next turn. The displayed transcript is saved separately with `onEnd`. Holding the live session in memory avoids detach/resume bookkeeping in this single-process example. There are no custom shell tools, process launchers, event parsers, or sandbox setup scripts.
 
-This example follows the SDK's client-supplied message-history pattern. The server saves history for switching/reloading, but does not implement an authoritative message log, deduplication, or replay. It is a local single-user experiment, not a production backend. One turn per conversation may run at a time; turns are limited to six model steps and 90 seconds. Restarting clears all data. There is no persistence, stop/delete UI, auto-scroll, Markdown rendering, or recovery workflow. If a turn fails or is interrupted, start a new conversation.
+Phase 1 still follows `useChat → pipeAgentUIStreamToResponse → ToolLoopAgent`. Ask **Save my project name as Prairie**, then **Read my notes**. Its client supplies message history; Express stores transcripts for switching/reloading and owns the notes tools. This is a local single-user experiment, not a production backend.
 
-## Check
+## Checks
 
 ```sh
 pnpm build
@@ -49,10 +79,12 @@ pnpm exec playwright install chromium
 pnpm test:e2e
 ```
 
-Tests inject an SDK mock model, exercise the real tool loop, and check separate conversation data and history. They make no paid API calls. Run the walkthrough with your key to test live OpenAI access.
+The tests exercise phase 1 with an SDK mock model. They do not create sandboxes or make paid model calls. Phase 2 has only been typechecked and built; run the manual experiment above with your credentials.
 
-## References / next phases
+## References / next phase
 
 - [AI SDK agents](https://ai-sdk.dev/docs/agents/building-agents)
-- [AI SDK chatbot](https://ai-sdk.dev/docs/ai-sdk-ui/chatbot)
-- [PLAN.md](PLAN.md): add the standard Codex harness and Vercel Sandbox, then prepare a fixed PrairieLearn course checkout.
+- [HarnessAgent UI integration](https://ai-sdk.dev/v7/docs/ai-sdk-harnesses/ui)
+- [Codex adapter](https://ai-sdk.dev/providers/ai-sdk-harnesses/codex)
+- [Vercel sandboxed coding agent guide](https://vercel.com/kb/guide/sandboxed-coding-agent-with-harnessagent)
+- [PLAN.md](PLAN.md): phase 3 prepares a fixed PrairieLearn course checkout before coding starts.

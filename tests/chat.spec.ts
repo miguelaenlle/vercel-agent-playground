@@ -18,12 +18,12 @@ test('tools, conversation isolation, history, and reload', async ({ page }) => {
   await expect(page.locator('article')).not.toContainText(['Prairie']);
   await page
     .getByLabel('Conversation', { exact: true })
-    .selectOption({ label: 'Conversation 1' });
+    .selectOption({ label: 'notes 1' });
   await expect(page.getByLabel('Server notes')).toContainText('Prairie');
   await page.reload();
   await page
     .getByLabel('Conversation', { exact: true })
-    .selectOption({ label: 'Conversation 1' });
+    .selectOption({ label: 'notes 1' });
   await expect(page.locator('article')).toContainText([
     'save my project',
     'Done.',

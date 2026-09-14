@@ -6,7 +6,8 @@ import { createApp, type Conversation } from './server.js';
 
 it('runs the SDK tool loop and stores separate transcripts and notes', async () => {
   const model = testModel();
-  const server = createServer(createApp(model));
+  const { app } = createApp(model);
+  const server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/conversations`;
   try {

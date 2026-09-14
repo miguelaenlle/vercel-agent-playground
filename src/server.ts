@@ -3,11 +3,19 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { openai } from '@ai-sdk/openai';
 import {
+  getHarnessErrorMessage,
+  type HarnessAgentSession,
+} from '@ai-sdk/harness/agent';
+import { createSandboxAgent } from './sandbox.js';
+import {
   ToolLoopAgent,
   isStepCount,
   tool,
   pipeAgentUIStreamToResponse,
   consumeStream,
+  createUIMessageStream,
+  pipeUIMessageStreamToResponse,
+  toUIMessageStream,
   type LanguageModel,
   type UIMessage,
 } from 'ai';
@@ -17,6 +25,7 @@ import { z } from 'zod';
 
 export type Conversation = {
   id: string;
+  mode: 'notes' | 'sandbox';
   messages: UIMessage[];
   notes: Record<string, string>;
 };
@@ -24,7 +33,14 @@ export type Conversation = {
 export function createApp(model: LanguageModel) {
   const app = express();
   const conversations = new Map<string, Conversation>();
-  const running = new Set<string>();
+  const running = new Map<string, AbortController>();
+  const sandboxes = new Map<
+    string,
+    {
+      agent: ReturnType<typeof createSandboxAgent>;
+      session: HarnessAgentSession;
+    }
+  >();
   app.use('/api', (req, res, next) => {
     const host = req.get('host');
     if (
@@ -41,27 +57,86 @@ export function createApp(model: LanguageModel) {
   app.get('/api/conversations', (_req, res) =>
     res.json([...conversations.values()]),
   );
-  app.post('/api/conversations', (_req, res) => {
+  app.post('/api/conversations', (req, res) => {
     const conversation: Conversation = {
       id: crypto.randomUUID(),
+      mode: z.enum(['notes', 'sandbox']).default('notes').parse(req.body?.mode),
       messages: [],
       notes: {},
     };
     conversations.set(conversation.id, conversation);
     res.json(conversation);
   });
+  app.delete('/api/conversations/:id', async (req, res) => {
+    if (running.has(req.params.id))
+      return res.status(409).send('Stop the turn before deleting.');
+    await sandboxes.get(req.params.id)?.session.destroy();
+    sandboxes.delete(req.params.id);
+    conversations.delete(req.params.id);
+    res.sendStatus(204);
+  });
   app.post('/api/conversations/:id/chat', async (req, res) => {
     const conversation = conversations.get(req.params.id);
     if (!conversation) return res.status(404).send('Conversation not found.');
     if (running.has(conversation.id))
       return res.status(409).send('A turn is already running.');
-    running.add(conversation.id);
     const controller = new AbortController();
+    running.set(conversation.id, controller);
     res.on('close', () => {
       if (!res.writableFinished) controller.abort();
     });
     let drain = Promise.resolve();
     try {
+      if (conversation.mode === 'sandbox') {
+        const message = z
+          .object({
+            role: z.literal('user'),
+            parts: z
+              .array(z.object({ type: z.literal('text'), text: z.string() }))
+              .min(1),
+          })
+          .parse(req.body.messages?.at(-1));
+        const prompt = message.parts.map((part) => part.text).join('\n');
+        await pipeUIMessageStreamToResponse({
+          response: res,
+          stream: createUIMessageStream({
+            originalMessages: req.body.messages,
+            execute: async ({ writer }) => {
+              let runtime = sandboxes.get(conversation.id);
+              if (!runtime) {
+                const agent = createSandboxAgent();
+                const session = await agent.createSession({
+                  sessionId: conversation.id,
+                  abortSignal: controller.signal,
+                });
+                runtime = { agent, session };
+                sandboxes.set(conversation.id, runtime);
+              }
+              // The native session owns history; send only this turn's new text.
+              const result = await runtime.agent.stream({
+                session: runtime.session,
+                prompt,
+                abortSignal: controller.signal,
+                timeout: 5 * 60 * 1000,
+              });
+              writer.merge(
+                toUIMessageStream({
+                  stream: result.stream,
+                  onError: getHarnessErrorMessage,
+                }),
+              );
+            },
+            onEnd: ({ messages }) => {
+              conversation.messages = messages;
+            },
+            onError: getHarnessErrorMessage,
+          }),
+          consumeSseStream: ({ stream }) => {
+            drain = consumeStream({ stream });
+          },
+        });
+        return;
+      }
       const agent = new ToolLoopAgent({
         model,
         instructions:
@@ -117,12 +192,22 @@ export function createApp(model: LanguageModel) {
         .send('Request failed. Check the message and server configuration.');
   };
   app.use(errors);
-  return app;
+  return {
+    app,
+    close: async () => {
+      for (const controller of running.values()) controller.abort();
+      await Promise.all(
+        [...sandboxes.values()].map(({ session }) => session.destroy()),
+      );
+    },
+  };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   config({ path: '.env.local', quiet: true });
-  const app = createApp(openai(process.env.OPENAI_MODEL || 'gpt-4.1-mini'));
+  const { app, close } = createApp(
+    openai(process.env.OPENAI_MODEL || 'gpt-4.1-mini'),
+  );
   const server = createServer(app);
   if (process.argv.includes('--production')) {
     app.use(express.static(resolve('dist/client')));
@@ -132,6 +217,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       server: { middlewareMode: true, hmr: { server } },
     });
     app.use(vite.middlewares);
+  }
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => {
+      server.close();
+      void close().finally(() => process.exit());
+    });
   }
   const port = Number(process.env.PORT || 4310);
   server.listen(port, '127.0.0.1', () =>

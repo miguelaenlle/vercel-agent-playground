@@ -17,9 +17,12 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
+    "@ai-sdk/harness": "1.0.110",
+    "@ai-sdk/harness-codex": "1.0.112",
     "@ai-sdk/openai": "4.0.66",
     "@ai-sdk/react": "4.0.102",
-    "ai": "7.0.99",
+    "@ai-sdk/sandbox-vercel": "1.0.110",
+    "ai": "7.0.100",
     "dotenv": "17.4.2",
     "express": "5.2.1",
     "react": "19.3.0",

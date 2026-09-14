@@ -21,7 +21,7 @@ function Chat({
         api: `/api/conversations/${conversation.id}/chat`,
       }),
   );
-  const { messages, sendMessage, status, error } = useChat({
+  const { messages, sendMessage, status, error, stop } = useChat({
     transport,
     messages: conversation.messages,
     onFinish: refresh,
@@ -67,10 +67,20 @@ function Chat({
         />
         <button disabled={busy || !text.trim()}>Send</button>
       </form>
-      <h2>Server notes</h2>
-      <pre aria-label="Server notes">
-        {JSON.stringify(conversation.notes, null, 2)}
-      </pre>
+      {busy && <button onClick={() => void stop()}>Stop</button>}
+      {conversation.mode === 'notes' ? (
+        <>
+          <h2>Server notes</h2>
+          <pre aria-label="Server notes">
+            {JSON.stringify(conversation.notes, null, 2)}
+          </pre>
+        </>
+      ) : (
+        <p>
+          Codex session: {conversation.id}. Files stay in its sandbox between
+          turns.
+        </p>
+      )}
     </>
   );
 }
@@ -78,6 +88,7 @@ function Chat({
 function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [id, setId] = useState('');
+  const [mode, setMode] = useState('notes');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -97,7 +108,11 @@ function App() {
 
   async function create() {
     try {
-      const response = await fetch('/api/conversations', { method: 'POST' });
+      const response = await fetch('/api/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      });
       if (!response.ok) throw new Error('Could not create conversation.');
       const conversation: Conversation = await response.json();
       await refresh();
@@ -106,10 +121,30 @@ function App() {
       setError((error as Error).message);
     }
   }
+  async function remove() {
+    const response = await fetch(`/api/conversations/${id}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      setError('Could not delete conversation. Stop its turn first.');
+      return;
+    }
+    setId('');
+    await refresh();
+  }
   const selected = conversations.find((conversation) => conversation.id === id);
   return (
     <main>
       <h1>AI SDK experiment</h1>
+      <select
+        aria-label="Mode"
+        value={mode}
+        onChange={(event) => setMode(event.target.value)}
+        disabled={busy}
+      >
+        <option value="notes">1: Chat + notes</option>
+        <option value="sandbox">2: Codex + sandbox</option>
+      </select>{' '}
       <button onClick={() => void create()} disabled={busy}>
         New conversation
       </button>{' '}
@@ -122,10 +157,15 @@ function App() {
         <option value="">Select conversation</option>
         {conversations.map((conversation, i) => (
           <option key={conversation.id} value={conversation.id}>
-            Conversation {i + 1}
+            {conversation.mode} {i + 1}
           </option>
         ))}
       </select>
+      {selected && (
+        <button onClick={() => void remove()} disabled={busy}>
+          Delete
+        </button>
+      )}
       {error && <p role="alert">{error}</p>}
       {selected && (
         <Chat

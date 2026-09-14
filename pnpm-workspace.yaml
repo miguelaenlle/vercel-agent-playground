@@ -1,2 +1,8 @@
 allowBuilds:
   esbuild: true
+minimumReleaseAgeExclude:
+  - '@ai-sdk/gateway@4.0.81'
+  - '@ai-sdk/harness-codex@1.0.112'
+  - '@ai-sdk/harness@1.0.110'
+  - '@ai-sdk/sandbox-vercel@1.0.110'
+  - ai@7.0.100
