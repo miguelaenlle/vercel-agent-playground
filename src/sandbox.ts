@@ -66,11 +66,29 @@ export async function createSandboxAgent(sessionId: string) {
     keepLastSnapshots: { count: 1 },
     ...sandboxCredentials(),
   });
+  // HarnessAgent requires a child directory; Vercel clones into the sandbox root.
+  const setup = await sandbox.runCommand({
+    cmd: 'node',
+    args: [
+      '-e',
+      `
+      const fs = require('node:fs');
+      const entries = fs.readdirSync('.');
+      const directory = fs.mkdtempSync('course-');
+      for (const entry of entries) fs.renameSync(entry, directory + '/' + entry);
+      console.log(directory);
+    `,
+    ],
+  });
+  if (setup.exitCode !== 0) {
+    throw new HarnessError({ message: 'Preparing course directory failed.' });
+  }
+  const workDir = (await setup.stdout()).trim();
   const agent = new HarnessAgent({
     harness: createCodex({ auth: { OPENAI_API_KEY } }),
     model: process.env.CODEX_MODEL || 'gpt-5.3-codex',
     sandbox: createVercelSandbox({ sandbox }),
-    sandboxConfig: { workDir: sandbox.cwd },
+    sandboxConfig: { workDir },
     tools: {
       hostPing: tool({
         description: 'Ping the Express server and get its current time.',
