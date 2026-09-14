@@ -8,7 +8,7 @@ import { createCodex } from '@ai-sdk/harness-codex';
 import { createVercelSandbox } from '@ai-sdk/sandbox-vercel';
 import { Sandbox } from '@vercel/sandbox';
 
-export const ACTIVE_RUNTIME_MS = 3 * 60_000;
+export const ACTIVE_RUNTIME_MS = 10 * 60_000;
 
 export type SandboxRuntime = Awaited<ReturnType<typeof createSandboxAgent>> & {
   session?: HarnessAgentSession;

@@ -47,7 +47,11 @@ function Chat({
           (conversation.expiresAt > now
             ? ` Runtime remaining: ${Math.ceil((conversation.expiresAt - now) / 1000)} seconds.`
             : ' Runtime deadline reached. Send a message to resume from saved files.')}
-        {conversation.state === 'waiting_for_agent' && ' Heartbeat active.'}
+        {(conversation.state === 'starting' ||
+          conversation.state === 'waiting_for_agent') &&
+          ' Checked every minute; kept alive with 10 minutes remaining.'}
+        {conversation.state === 'waiting_for_user' &&
+          ' One final idle allowance, then no further renewals.'}
       </p>
       {messages.map((message) => (
         <article key={message.id}>

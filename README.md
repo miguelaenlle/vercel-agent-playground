@@ -46,7 +46,7 @@ Real sandbox execution and restore testing are intentionally manual.
 
 One `liveSandboxes` map and one background lifecycle loop per Express process. The agent path only sets conversation state; the lifecycle manager reads it:
 
-- **Active turn:** the manager checks locally each second and extends toward three minutes when fewer than two minutes remain. This includes harness setup, thinking, and tool execution.
+- **Active turn:** once per minute, extend the deadline to 10 minutes from that check. This includes harness setup, thinking, and tool execution.
 - **Completed turn:** detach the native harness session and enter `waiting_for_user`. When the manager first observes the transition into `waiting_for_user`, it extends toward now + `SANDBOX_IDLE_MINUTES` (default 10). Further idle checks do nothing.
 - **Next message:** a native SDK command resumes the sandbox if stopped, then the harness reattaches using its saved resume state.
 - **Server exits:** renewals stop. Vercel stops the sandbox at its existing deadline and persists its filesystem. We never delete the sandbox on idle or shutdown.
@@ -67,13 +67,15 @@ Normal path: `offline → starting → waiting_for_agent → waiting_for_user �
 SANDBOX_IDLE_MINUTES=10
 ```
 
+The sandbox starts with a 10-minute TTL. Checks continue once per minute in all states. Active checks top up to 10 minutes remaining; they do not add 10 minutes on top of the existing deadline. Idle checks grant one final allowance, then only confirm expiration. With the default settings, an observed idle transition expires roughly 10–11 minutes after the turn ends.
+
 The manager tracks only the previously observed state. Timing is approximate: a whole turn between checks can go unnoticed and keep the previous deadline. No transition timestamps or idle deadlines are maintained by the agent.
 
 Restart Express after changing this setting. No Workflow deployment, `LIFECYCLE_URL`, or `LIFECYCLE_SECRET` is needed. Old lifecycle environment variables are ignored.
 
 `extendTimeout()` only adds time. We calculate the difference from the SDK's `expiresAt`, prevent overlapping lifecycle passes, and display the last acknowledged deadline in the UI. Polling the UI does not renew anything. The countdown reaching zero indicates the expected timeout, not an independently verified stop.
 
-An existing deadline cannot be shortened: if a new turn starts soon after a 10-minute idle allowance was granted, it may still have nearly 10 minutes left. Likewise, setting idle time below three minutes cannot shorten the initial active allowance. A failed heartbeat aborts the local turn and stops renewal; no automatic retry loop keeps a failed conversation alive. The five-minute agent turn limit and Vercel's maximum continuous session duration still apply.
+An existing deadline cannot be shortened: if a new turn starts soon after a 10-minute idle allowance was granted, it may still have nearly 10 minutes left. Likewise, setting idle time below 10 minutes cannot shorten the initial active allowance. A failed heartbeat aborts the local turn and stops renewal; no automatic retry loop keeps a failed conversation alive. The five-minute agent turn limit and Vercel's maximum continuous session duration still apply.
 
 Vercel owns filesystem snapshots (`persistent: true`, keeping the latest snapshot). Snapshot storage remains billable after compute stops; default snapshot expiration is 30 days after last use. Express owns the in-memory conversation list and harness resume payload. **Restarting Express loses that metadata and the chat list**, even though the sandbox files persist in Vercel. Recovery across webserver restarts is outside this minimal prototype.
 

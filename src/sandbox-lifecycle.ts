@@ -3,8 +3,7 @@ import { z } from 'zod';
 import type { Conversation } from './conversation.js';
 import { ACTIVE_RUNTIME_MS, sandboxCredentials } from './sandbox.js';
 
-const CHECK_INTERVAL_MS = 1000;
-const RENEW_BELOW_MS = 2 * 60_000;
+const CHECK_INTERVAL_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 15_000;
 
 export function startSandboxLifecycle(
@@ -39,6 +38,7 @@ export function startSandboxLifecycle(
         return;
       }
 
+      // Idle: grant one allowance when first observed, then let Vercel expire it.
       if (state === 'waiting_for_user') {
         if (previousState !== state) {
           await extendUntil(conversation, sandbox, Date.now() + idleMs);
@@ -46,13 +46,8 @@ export function startSandboxLifecycle(
         return;
       }
 
-      if (deadline - Date.now() < RENEW_BELOW_MS) {
-        await extendUntil(
-          conversation,
-          sandbox,
-          Date.now() + ACTIVE_RUNTIME_MS,
-        );
-      }
+      // Starting or working: keep ten minutes remaining on every check.
+      await extendUntil(conversation, sandbox, Date.now() + ACTIVE_RUNTIME_MS);
     } catch (error) {
       if (!stopped && conversation.state === state) onError(id, error);
     }
@@ -80,6 +75,7 @@ export function startSandboxLifecycle(
     sandbox: Sandbox,
     target: number,
   ) {
+    // The API adds time; add only the difference to avoid accumulating unused TTL.
     const extension = Math.ceil(target - sandbox.expiresAt!.getTime());
     // Vercel rejects extensions shorter than one second.
     if (extension < 1000) return;
