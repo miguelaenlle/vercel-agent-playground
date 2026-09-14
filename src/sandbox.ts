@@ -7,6 +7,7 @@ import {
 import { createCodex } from '@ai-sdk/harness-codex';
 import { createVercelSandbox } from '@ai-sdk/sandbox-vercel';
 import { Sandbox } from '@vercel/sandbox';
+import { tool } from 'ai';
 import { z } from 'zod';
 
 export function sandboxActiveRuntimeMs() {
@@ -57,6 +58,16 @@ export async function createSandboxAgent(sessionId: string) {
     model: process.env.CODEX_MODEL || 'gpt-5.3-codex',
     sandbox: createVercelSandbox({ sandbox }),
     sandboxConfig: { workDir: 'workspace' },
+    tools: {
+      hostPing: tool({
+        description: 'Ping the Express server and get its current time.',
+        inputSchema: z.object({}),
+        execute: async () => ({
+          executedOn: 'host',
+          time: new Date().toISOString(),
+        }),
+      }),
+    },
     instructions:
       'Work in the current workspace. Use your native file and shell tools to fulfill requests. Keep replies brief. When changing data, use data.json unless asked otherwise.',
   });

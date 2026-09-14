@@ -40,6 +40,8 @@ Credentials stay in the ignored `.env.local`. The Codex adapter receives only th
 5. In the same conversation, ask it to read `data.json`. The SDK resumes the sandbox, and the harness resumes its saved session. Verify that the edits survived.
 6. Create a second conversation to check workspace isolation. Try Stop during a turn; interrupted or failed turns may be marked unavailable and are no longer renewed.
 
+Ask **Call hostPing and show its result.** The tool's `execute` callback runs in Express and returns `{ executedOn: "host", time: "..." }` to Codex. The existing chat displays the tool result. Native file and shell tools still run inside the sandbox.
+
 Real sandbox execution and restore testing are intentionally manual.
 
 ## Lifecycle
