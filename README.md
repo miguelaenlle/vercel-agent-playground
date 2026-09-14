@@ -31,6 +31,19 @@ Alternatively, link a Vercel project with `vercel link` and retrieve `VERCEL_OID
 
 Credentials stay in the ignored `.env.local`. The Codex adapter receives only the OpenAI key for authentication discovery, avoiding automatic Gateway/subscription selection. The Vercel adapter supports request transformations: Codex receives a placeholder, and the adapter configures injection of the actual OpenAI credential into matching outbound requests. We do not pass the host environment into the VM.
 
+## Course checkout
+
+Set these in `.env.local` before creating a conversation:
+
+```dotenv
+COURSE_REPO_URL=https://github.com/your-org/your-course.git
+GITHUB_PAT=...
+```
+
+Use a fine-grained PAT scoped to that repository with **Contents: Read**. Restart Express after changing configuration, then create a new conversation. `Sandbox.create({ source })` clones the default branch before Codex starts. The harness works in `sandbox.cwd`, the checkout directory. Subsequent turns and sandbox resumes reuse the checkout, preserving edits. Clone failures fail setup before starting Codex. No dependency installation or PrairieLearn server setup is performed.
+
+Try **List the course questions, then make a small wording change to one question and show the Git diff.** The PAT is supplied to Vercel's git source API, not embedded in a clone command or supplied as an agent environment variable.
+
 ## Experiment
 
 1. Run `pnpm dev` and open <http://localhost:4310>.
@@ -108,4 +121,4 @@ pnpm format:check
 
 - [HarnessAgent UI integration](https://ai-sdk.dev/v7/docs/ai-sdk-harnesses/ui)
 - [Vercel persistence](https://vercel.com/docs/sandbox/concepts/persistent-sandboxes)
-- [PLAN.md](PLAN.md): the prepared-course phase remains separate.
+- [PLAN.md](PLAN.md): the remaining course setup and validation work.

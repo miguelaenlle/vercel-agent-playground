@@ -6,7 +6,7 @@ export function reportError(stage: string, error: unknown) {
     detail += `\nCaused by ${error.cause.name}: ${error.cause.message}`;
   }
   for (const [name, value] of Object.entries(process.env)) {
-    if (value && /KEY|TOKEN|SECRET|PASSWORD/i.test(name)) {
+    if (value && /KEY|TOKEN|SECRET|PASSWORD|(?:^|_)PAT$/i.test(name)) {
       detail = detail.replaceAll(value, '[redacted]');
     }
   }

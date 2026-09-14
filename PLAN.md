@@ -16,17 +16,15 @@ Use real Vercel credentials for Sandbox and direct OpenAI credentials for the mo
 
 Acceptance experiment: create a JSON file, change it on a later turn, and confirm a second conversation has a separate workspace. Exercise Stop and idle expiration. Verify the adapter owns provisioning, the coding bridge, and event conversion rather than adding a custom runner.
 
-## Phase 3: sandbox + prepared PrairieLearn course — planned
+## Phase 3: sandbox + prepared PrairieLearn course — cloning implemented
 
-Clone a fixed test course before handing the workspace to the standard Codex harness. Keep repository-specific configuration and private-course details outside this public roadmap.
+Vercel clones the configured course with a repository-scoped PAT during sandbox creation. Codex works in the checkout, and subsequent turns resume it without recloning. Configuration stays in `.env.local`. Live verification remains manual.
 
-- Use supported bootstrap/session setup hooks for prerequisites and the checkout.
+Remaining setup and validation work:
+
+- Use supported setup hooks if course prerequisites are needed.
 - Resolve and record the source commit once per conversation.
-- Resume the existing checkout without recloning or overwriting edits.
-- Use a repository-scoped, read-only credential for private clones, held outside the VM and removed from the clone path before the agent starts.
-- Supply short course-editing instructions; keep the stock harness tools.
 - Show setup status, actual changed files, and the Git diff in the inspector.
-- Fail setup visibly rather than starting an agent against an incomplete checkout.
 
 First experiment: edit one question's wording while preserving its identity and answer structure; refine that edit on a second turn; verify another conversation starts clean. Follow with a small Python question-code edit and appropriate checks.
 
