@@ -7,6 +7,7 @@ import {
   type HarnessAgentResumeSessionState,
 } from '@ai-sdk/harness/agent';
 import { createSandboxAgent } from './sandbox.js';
+import { reportError } from './errors.js';
 import {
   consumeStream,
   createUIMessageStream,
@@ -73,11 +74,11 @@ export function createApp() {
   const heartbeat = setInterval(() => {
     for (const [id, runtime] of liveSandboxes) {
       if (!runtime.active) continue;
-      void renew(id, runtime, 3 * 60_000, true).catch(() => {
+      void renew(id, runtime, 3 * 60_000, true).catch((error) => {
         runtime.active = false;
         conversations.get(id)!.sandboxState = 'unavailable';
         running.get(id)?.controller.abort();
-        console.error('Sandbox heartbeat failed:', id);
+        reportError(`Sandbox heartbeat ${id}`, error);
       });
     }
   }, 60_000);
@@ -130,6 +131,16 @@ export function createApp() {
     });
     let drain = Promise.resolve();
     let failed = false;
+    let stage = 'Validating message';
+    const onError = (error: unknown) => {
+      failed = true;
+      conversation.sandboxState = 'unavailable';
+      reportError(stage, error);
+      const message = getHarnessErrorMessage(error);
+      return message === 'An error occurred.'
+        ? `${stage} failed. See the server terminal for details.`
+        : message;
+    };
     try {
       const message = z
         .object({
@@ -147,6 +158,7 @@ export function createApp() {
           execute: async ({ writer }) => {
             let runtime = liveSandboxes.get(conversation.id);
             if (!runtime) {
+              stage = 'Creating sandbox';
               runtime = {
                 ...(await createSandboxAgent(conversation.id)),
                 active: false,
@@ -156,15 +168,19 @@ export function createApp() {
             }
             conversation.sandboxState = 'active';
             // A command auto-resumes a stopped persistent sandbox before attachment.
+            stage = 'Resuming sandbox';
             await runtime.sandbox.runCommand({ cmd: 'true' });
+            stage = 'Extending sandbox timeout';
             await renew(conversation.id, runtime, 3 * 60_000);
             runtime.active = true;
+            stage = 'Starting Codex';
             runtime.session = await runtime.agent.createSession({
               sessionId: conversation.id,
               resumeFrom: runtime.resumeFrom,
               abortSignal: controller.signal,
             });
             // The native session owns history; send only this turn's new text.
+            stage = 'Running Codex';
             const result = await runtime.agent.stream({
               session: runtime.session,
               prompt,
@@ -174,18 +190,14 @@ export function createApp() {
             writer.merge(
               toUIMessageStream({
                 stream: result.stream,
-                onError: getHarnessErrorMessage,
+                onError,
               }),
             );
           },
           onEnd: ({ messages }) => {
             conversation.messages = messages;
           },
-          onError: (error) => {
-            failed = true;
-            conversation.sandboxState = 'unavailable';
-            return getHarnessErrorMessage(error);
-          },
+          onError,
         }),
         consumeSseStream: ({ stream }) => {
           drain = consumeStream({ stream });
@@ -198,9 +210,11 @@ export function createApp() {
         if (runtime) {
           runtime.active = false;
           if (runtime.session && !runtime.session.hasUnfinishedTurn()) {
+            stage = 'Saving Codex session';
             runtime.resumeFrom = await runtime.session.detach();
             runtime.session = undefined;
             if (!failed && !controller.signal.aborted) {
+              stage = 'Extending idle timeout';
               await renew(conversation.id, runtime, idleMs);
               conversation.sandboxState = 'idle';
             } else {
@@ -210,7 +224,8 @@ export function createApp() {
             conversation.sandboxState = 'unavailable';
           }
         }
-      } catch {
+      } catch (error) {
+        reportError(stage, error);
         const runtime = liveSandboxes.get(conversation.id);
         if (runtime) runtime.active = false;
         conversation.sandboxState = 'unavailable';
@@ -220,7 +235,8 @@ export function createApp() {
       }
     }
   });
-  const errors: ErrorRequestHandler = (_error, _req, res, _next) => {
+  const errors: ErrorRequestHandler = (error, _req, res, _next) => {
+    reportError('Request', error);
     if (res.headersSent) res.end();
     else
       res
