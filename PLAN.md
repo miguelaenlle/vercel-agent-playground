@@ -2,13 +2,7 @@
 
 The experiment tests how much agent infrastructure can be supplied by Vercel-maintained libraries and Vercel services before integrating the approach into PrairieLearn.
 
-## Phase 1: agent + chat — implemented
-
-React, TypeScript, and one Express server with in-memory conversations. AI SDK `ToolLoopAgent` runs two tools: `saveNote` and `readNotes`. The direct OpenAI provider handles model calls; SDK helpers stream messages to `useChat`.
-
-No AI Gateway, Vercel account, database, sandbox, or custom streaming protocol is required. The app owns an in-memory conversation map, notes tools, and a per-conversation running guard. The client supplies message history; SDK helpers handle streaming. See [README.md](README.md) for setup and experiments.
-
-## Phase 2: agent + chat + sandbox — implemented; manual verification pending
+## Codex + sandbox — implemented; manual verification pending
 
 Uses the standard Codex harness through pinned AI SDK harness and Vercel Sandbox adapters. Sandbox execution has intentionally been left for manual testing.
 
@@ -17,7 +11,6 @@ Uses the standard Codex harness through pinned AI SDK harness and Vercel Sandbox
 - Keep the live native session in the Express process and reuse it on later turns. UI messages display history; they are not a substitute for native session continuation. Detach/resume persistence is deferred to keep the code minimal.
 - Inspect native tool outputs when asking the harness to read workspace files. A separate file browser is deferred.
 - Stop generation on cancellation; terminate the sandbox on deletion and bound its maximum lifetime.
-- Keep phase 1 available as the simple baseline.
 
 Use real Vercel credentials for Sandbox and direct OpenAI credentials for the model. AI Gateway remains optional. Keep provider credentials outside the sandbox using the adapter's supported network transformations.
 
@@ -43,7 +36,7 @@ Static JSON/Python checks do not prove PrairieLearn rendering or grading. Add va
 
 | Surface                                                           | Owner                                                     |
 | ----------------------------------------------------------------- | --------------------------------------------------------- |
-| Model/tool loop                                                   | AI SDK in phase 1; standard Codex harness in phases 2–3   |
+| Model/tool loop                                                   | Standard Codex harness                                    |
 | Browser message streaming                                         | AI SDK                                                    |
 | VM provisioning and isolation                                     | Vercel Sandbox in phases 2–3                              |
 | Coding bridge, native event conversion, session attachment        | Harness adapters                                          |

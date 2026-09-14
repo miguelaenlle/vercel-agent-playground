@@ -1,11 +1,6 @@
 # AI SDK experiment
 
-Minimal React + Express example with two modes:
-
-1. **Chat + notes:** `ToolLoopAgent`, two host tools, notes in memory.
-2. **Codex + sandbox:** `HarnessAgent`, the standard Codex adapter, one Vercel Sandbox per conversation.
-
-Both use OpenAI directly. AI Gateway is not required. Phase 2 is implemented but has not been run against Vercel; sandbox testing is intentionally manual.
+Minimal React + Express example: the standard Codex harness, one Vercel Sandbox per conversation, and streaming chat. OpenAI is called directly; AI Gateway is not required. Sandbox testing is intentionally manual.
 
 ## Run
 
@@ -18,11 +13,9 @@ cp .env.example .env.local  # Only if .env.local does not already exist.
 pnpm dev
 ```
 
-Open <http://localhost:4310>. Choose a mode, then **New conversation**. Restart the server after changing `.env.local`.
+Open <http://localhost:4310>. Click **New conversation**. Restart the server after changing `.env.local`.
 
-Phase 1 needs only `OPENAI_API_KEY`, with OpenAI API billing enabled. It defaults to `OPENAI_MODEL=gpt-4.1-mini`.
-
-Phase 2 additionally needs a Vercel project with Sandbox access:
+You need an OpenAI API key with API billing enabled and a Vercel project with Sandbox access:
 
 ```dotenv
 OPENAI_API_KEY=...
@@ -32,15 +25,15 @@ VERCEL_PROJECT_ID=prj_...
 CODEX_MODEL=gpt-5.3-codex
 ```
 
-Create a [Vercel access token](https://vercel.com/account/tokens) with access to that team. Find the IDs in the team/project settings. `CODEX_MODEL` is a native Codex model name; set it to a Codex-compatible model your API key can access. Do not use the phase-1 chat model for the coding harness.
+Create a [Vercel access token](https://vercel.com/account/tokens) with access to that team. Find the IDs in the team/project settings. `CODEX_MODEL` is a native Codex model name; set it to a Codex-compatible model your API key can access.
 
 Alternatively, link a Vercel project with `vercel link` and retrieve `VERCEL_OIDC_TOKEN` with `vercel env pull`. Merge that token into `.env.local` without overwriting your OpenAI key. Local OIDC tokens expire and need refreshing. See [Sandbox authentication](https://vercel.com/docs/sandbox/concepts/authentication).
 
 Credentials stay in the ignored `.env.local`. The Codex adapter receives only the OpenAI key for authentication discovery, avoiding automatic Gateway/subscription selection. The Vercel adapter supports request transformations: Codex receives a placeholder, and the adapter configures injection of the actual OpenAI credential into matching outbound requests. We do not pass the host environment into the VM.
 
-## Phase 2 experiment
+## Experiment
 
-1. Select **2: Codex + sandbox**, then **New conversation**.
+1. Click **New conversation**.
 2. Send: **Create data.json containing {"items":["one","two","three"]}. Read it with a shell command and show the result.** The first turn provisions the sandbox and starts the stock Codex harness; expect it to take longer.
 3. Send: **Append "four" to data.json, then use Python to print the item count.** It should be 4. The same native session and files are reused.
 4. Create a second sandbox conversation and ask: **Check whether data.json exists. Do not create it.** It should be absent.
@@ -54,7 +47,7 @@ Sandboxes have a configured 30-minute execution lifetime; individual coding turn
 
 - [`src/sandbox.ts`](src/sandbox.ts): credentials and `new HarnessAgent({ harness: createCodex(...), sandbox: createVercelSandbox(...) })`.
 - [`src/server.ts`](src/server.ts): Express routes and two in-memory maps. The sandbox branch creates a session once, streams each new prompt, and converts its output with SDK helpers. Delete destroys the session.
-- [`src/client.tsx`](src/client.tsx): `useChat`, mode/conversation selectors, plain text and raw SDK message parts.
+- [`src/client.tsx`](src/client.tsx): `useChat`, conversation selector, plain text and raw SDK message parts.
 
 ```text
 useChat → Express → HarnessAgent.stream({ session, prompt })
@@ -68,18 +61,14 @@ useChat → Express → HarnessAgent.stream({ session, prompt })
 
 The live harness session owns coding history. Only the latest user text goes into its next turn. The displayed transcript is saved separately with `onEnd`. Holding the live session in memory avoids detach/resume bookkeeping in this single-process example. There are no custom shell tools, process launchers, event parsers, or sandbox setup scripts.
 
-Phase 1 still follows `useChat → pipeAgentUIStreamToResponse → ToolLoopAgent`. Ask **Save my project name as Prairie**, then **Read my notes**. Its client supplies message history; Express stores transcripts for switching/reloading and owns the notes tools. This is a local single-user experiment, not a production backend.
-
 ## Checks
 
 ```sh
 pnpm build
-pnpm test
-pnpm exec playwright install chromium
-pnpm test:e2e
+pnpm format:check
 ```
 
-The tests exercise phase 1 with an SDK mock model. They do not create sandboxes or make paid model calls. Phase 2 has only been typechecked and built; run the manual experiment above with your credentials.
+CI checks formatting and the build. Sandbox execution is left to the manual experiment above; there are no mocked agent modes or test servers.
 
 ## References / next phase
 

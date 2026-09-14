@@ -68,19 +68,10 @@ function Chat({
         <button disabled={busy || !text.trim()}>Send</button>
       </form>
       {busy && <button onClick={() => void stop()}>Stop</button>}
-      {conversation.mode === 'notes' ? (
-        <>
-          <h2>Server notes</h2>
-          <pre aria-label="Server notes">
-            {JSON.stringify(conversation.notes, null, 2)}
-          </pre>
-        </>
-      ) : (
-        <p>
-          Codex session: {conversation.id}. Files stay in its sandbox between
-          turns.
-        </p>
-      )}
+      <p>
+        Codex session: {conversation.id}. Files stay in its sandbox between
+        turns.
+      </p>
     </>
   );
 }
@@ -88,7 +79,6 @@ function Chat({
 function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [id, setId] = useState('');
-  const [mode, setMode] = useState('notes');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -110,8 +100,6 @@ function App() {
     try {
       const response = await fetch('/api/conversations', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode }),
       });
       if (!response.ok) throw new Error('Could not create conversation.');
       const conversation: Conversation = await response.json();
@@ -136,15 +124,6 @@ function App() {
   return (
     <main>
       <h1>AI SDK experiment</h1>
-      <select
-        aria-label="Mode"
-        value={mode}
-        onChange={(event) => setMode(event.target.value)}
-        disabled={busy}
-      >
-        <option value="notes">1: Chat + notes</option>
-        <option value="sandbox">2: Codex + sandbox</option>
-      </select>{' '}
       <button onClick={() => void create()} disabled={busy}>
         New conversation
       </button>{' '}
@@ -157,7 +136,7 @@ function App() {
         <option value="">Select conversation</option>
         {conversations.map((conversation, i) => (
           <option key={conversation.id} value={conversation.id}>
-            {conversation.mode} {i + 1}
+            Conversation {i + 1}
           </option>
         ))}
       </select>

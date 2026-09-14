@@ -11,15 +11,12 @@
     "build": "tsc --noEmit && vite build",
     "start": "tsx src/server.ts --production",
     "check": "tsc --noEmit",
-    "test": "vitest run",
-    "test:e2e": "playwright test",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
   "dependencies": {
     "@ai-sdk/harness": "1.0.110",
     "@ai-sdk/harness-codex": "1.0.112",
-    "@ai-sdk/openai": "4.0.66",
     "@ai-sdk/react": "4.0.102",
     "@ai-sdk/sandbox-vercel": "1.0.110",
     "ai": "7.0.100",
@@ -30,7 +27,6 @@
     "zod": "4.6.4"
   },
   "devDependencies": {
-    "@playwright/test": "1.63.0",
     "@types/express": "5.0.6",
     "@types/node": "24.13.4",
     "@types/react": "19.3.0",
@@ -39,8 +35,7 @@
     "prettier": "3.9.6",
     "tsx": "4.23.13",
     "typescript": "7.0.2",
-    "vite": "8.3.0",
-    "vitest": "5.0.0"
+    "vite": "8.3.0"
   },
   "packageManager": "pnpm@11.19.0"
 }

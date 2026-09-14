@@ -1,22 +1,16 @@
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
-import { openai } from '@ai-sdk/openai';
 import {
   getHarnessErrorMessage,
   type HarnessAgentSession,
 } from '@ai-sdk/harness/agent';
 import { createSandboxAgent } from './sandbox.js';
 import {
-  ToolLoopAgent,
-  isStepCount,
-  tool,
-  pipeAgentUIStreamToResponse,
   consumeStream,
   createUIMessageStream,
   pipeUIMessageStreamToResponse,
   toUIMessageStream,
-  type LanguageModel,
   type UIMessage,
 } from 'ai';
 import { config } from 'dotenv';
@@ -25,12 +19,10 @@ import { z } from 'zod';
 
 export type Conversation = {
   id: string;
-  mode: 'notes' | 'sandbox';
   messages: UIMessage[];
-  notes: Record<string, string>;
 };
 
-export function createApp(model: LanguageModel) {
+export function createApp() {
   const app = express();
   const conversations = new Map<string, Conversation>();
   const running = new Map<string, AbortController>();
@@ -57,12 +49,10 @@ export function createApp(model: LanguageModel) {
   app.get('/api/conversations', (_req, res) =>
     res.json([...conversations.values()]),
   );
-  app.post('/api/conversations', (req, res) => {
+  app.post('/api/conversations', (_req, res) => {
     const conversation: Conversation = {
       id: crypto.randomUUID(),
-      mode: z.enum(['notes', 'sandbox']).default('notes').parse(req.body?.mode),
       messages: [],
-      notes: {},
     };
     conversations.set(conversation.id, conversation);
     res.json(conversation);
@@ -87,94 +77,49 @@ export function createApp(model: LanguageModel) {
     });
     let drain = Promise.resolve();
     try {
-      if (conversation.mode === 'sandbox') {
-        const message = z
-          .object({
-            role: z.literal('user'),
-            parts: z
-              .array(z.object({ type: z.literal('text'), text: z.string() }))
-              .min(1),
-          })
-          .parse(req.body.messages?.at(-1));
-        const prompt = message.parts.map((part) => part.text).join('\n');
-        await pipeUIMessageStreamToResponse({
-          response: res,
-          stream: createUIMessageStream({
-            originalMessages: req.body.messages,
-            execute: async ({ writer }) => {
-              let runtime = sandboxes.get(conversation.id);
-              if (!runtime) {
-                const agent = createSandboxAgent();
-                const session = await agent.createSession({
-                  sessionId: conversation.id,
-                  abortSignal: controller.signal,
-                });
-                runtime = { agent, session };
-                sandboxes.set(conversation.id, runtime);
-              }
-              // The native session owns history; send only this turn's new text.
-              const result = await runtime.agent.stream({
-                session: runtime.session,
-                prompt,
-                abortSignal: controller.signal,
-                timeout: 5 * 60 * 1000,
-              });
-              writer.merge(
-                toUIMessageStream({
-                  stream: result.stream,
-                  onError: getHarnessErrorMessage,
-                }),
-              );
-            },
-            onEnd: ({ messages }) => {
-              conversation.messages = messages;
-            },
-            onError: getHarnessErrorMessage,
-          }),
-          consumeSseStream: ({ stream }) => {
-            drain = consumeStream({ stream });
-          },
-        });
-        return;
-      }
-      const agent = new ToolLoopAgent({
-        model,
-        instructions:
-          'Use saveNote when asked to save information and readNotes when asked about saved information. Keep replies brief.',
-        stopWhen: isStepCount(6),
-        maxOutputTokens: 1500,
-        maxRetries: 0,
-        tools: {
-          saveNote: tool({
-            description: 'Save a note in this conversation.',
-            inputSchema: z.object({
-              key: z.string().max(80),
-              value: z.string().max(2000),
-            }),
-            execute: ({ key, value }) => {
-              conversation.notes = { ...conversation.notes, [key]: value };
-              return { key, value };
-            },
-          }),
-          readNotes: tool({
-            description: 'Read this conversation’s notes.',
-            inputSchema: z.object({}),
-            execute: () => conversation.notes,
-          }),
-        },
-      });
-      await pipeAgentUIStreamToResponse({
+      const message = z
+        .object({
+          role: z.literal('user'),
+          parts: z
+            .array(z.object({ type: z.literal('text'), text: z.string() }))
+            .min(1),
+        })
+        .parse(req.body.messages?.at(-1));
+      const prompt = message.parts.map((part) => part.text).join('\n');
+      await pipeUIMessageStreamToResponse({
         response: res,
-        agent,
-        uiMessages: req.body.messages,
-        abortSignal: controller.signal,
-        timeout: 90_000,
-        onEnd: ({ messages }) => {
-          conversation.messages = messages;
-        },
-        onError: () =>
-          'Model request failed. Check your OpenAI key, billing, and model.',
-        // Let the SDK finish saving the transcript even if the browser disconnects.
+        stream: createUIMessageStream({
+          originalMessages: req.body.messages,
+          execute: async ({ writer }) => {
+            let runtime = sandboxes.get(conversation.id);
+            if (!runtime) {
+              const agent = createSandboxAgent();
+              const session = await agent.createSession({
+                sessionId: conversation.id,
+                abortSignal: controller.signal,
+              });
+              runtime = { agent, session };
+              sandboxes.set(conversation.id, runtime);
+            }
+            // The native session owns history; send only this turn's new text.
+            const result = await runtime.agent.stream({
+              session: runtime.session,
+              prompt,
+              abortSignal: controller.signal,
+              timeout: 5 * 60 * 1000,
+            });
+            writer.merge(
+              toUIMessageStream({
+                stream: result.stream,
+                onError: getHarnessErrorMessage,
+              }),
+            );
+          },
+          onEnd: ({ messages }) => {
+            conversation.messages = messages;
+          },
+          onError: getHarnessErrorMessage,
+        }),
         consumeSseStream: ({ stream }) => {
           drain = consumeStream({ stream });
         },
@@ -205,9 +150,7 @@ export function createApp(model: LanguageModel) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   config({ path: '.env.local', quiet: true });
-  const { app, close } = createApp(
-    openai(process.env.OPENAI_MODEL || 'gpt-4.1-mini'),
-  );
+  const { app, close } = createApp();
   const server = createServer(app);
   if (process.argv.includes('--production')) {
     app.use(express.static(resolve('dist/client')));
