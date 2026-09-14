@@ -1,9 +1,8 @@
 import { Sandbox } from '@vercel/sandbox';
 import { z } from 'zod';
 import type { Conversation } from './conversation.js';
-import { ACTIVE_RUNTIME_MS, sandboxCredentials } from './sandbox.js';
+import { sandboxActiveRuntimeMs, sandboxCredentials } from './sandbox.js';
 
-const CHECK_INTERVAL_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 15_000;
 
 export function startSandboxLifecycle(
@@ -11,6 +10,8 @@ export function startSandboxLifecycle(
   sandboxes: Map<string, { sandbox: Sandbox }>,
   onError: (id: string, error: unknown) => void,
 ) {
+  const activeRuntimeMs = sandboxActiveRuntimeMs();
+  const checkIntervalMs = Math.min(60_000, activeRuntimeMs / 3);
   const idleMs =
     z.coerce
       .number()
@@ -20,7 +21,7 @@ export function startSandboxLifecycle(
   const previousStates = new Map<string, Conversation['state']>();
   let checking = false;
   let stopped = false;
-  let nextCheckAt = Date.now() + CHECK_INTERVAL_MS;
+  let nextCheckAt = Date.now() + checkIntervalMs;
 
   async function checkSandbox(id: string, sandbox: Sandbox) {
     const conversation = conversations.get(id)!;
@@ -47,8 +48,8 @@ export function startSandboxLifecycle(
         return;
       }
 
-      // Starting or working: keep ten minutes remaining on every check.
-      await extendUntil(conversation, sandbox, Date.now() + ACTIVE_RUNTIME_MS);
+      // Starting or working: top up to the configured active TTL.
+      await extendUntil(conversation, sandbox, Date.now() + activeRuntimeMs);
     } catch (error) {
       if (!stopped && conversation.state === state) onError(id, error);
     }
@@ -99,12 +100,17 @@ export function startSandboxLifecycle(
   }
 
   const timer = setInterval(() => {
-    nextCheckAt = Date.now() + CHECK_INTERVAL_MS;
+    nextCheckAt = Date.now() + checkIntervalMs;
     void checkAllSandboxes();
-  }, CHECK_INTERVAL_MS);
+  }, checkIntervalMs);
   timer.unref();
   return {
-    getStatus: () => ({ nextCheckAt, checking }),
+    getStatus: () => ({
+      nextCheckAt,
+      checking,
+      activeRuntimeMs,
+      checkIntervalMs,
+    }),
     stop: () => {
       stopped = true;
       clearInterval(timer);

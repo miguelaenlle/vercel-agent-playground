@@ -7,8 +7,17 @@ import {
 import { createCodex } from '@ai-sdk/harness-codex';
 import { createVercelSandbox } from '@ai-sdk/sandbox-vercel';
 import { Sandbox } from '@vercel/sandbox';
+import { z } from 'zod';
 
-export const ACTIVE_RUNTIME_MS = 10 * 60_000;
+export function sandboxActiveRuntimeMs() {
+  return (
+    z.coerce
+      .number()
+      .min(1)
+      .max(1440)
+      .parse(process.env.SANDBOX_ACTIVE_MINUTES || 10) * 60_000
+  );
+}
 
 export type SandboxRuntime = Awaited<ReturnType<typeof createSandboxAgent>> & {
   session?: HarnessAgentSession;
@@ -38,7 +47,7 @@ export async function createSandboxAgent(sessionId: string) {
     name: sessionId,
     runtime: 'node24',
     ports: [4000],
-    timeout: ACTIVE_RUNTIME_MS,
+    timeout: sandboxActiveRuntimeMs(),
     persistent: true,
     keepLastSnapshots: { count: 1 },
     ...sandboxCredentials(),

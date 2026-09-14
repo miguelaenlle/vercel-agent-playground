@@ -44,9 +44,6 @@ function Chat({
           (conversation.expiresAt > now
             ? ` Sandbox time remaining: ${Math.ceil((conversation.expiresAt - now) / 1000)} seconds.`
             : ' Sandbox deadline reached. Send a message to resume from saved files.')}
-        {(conversation.state === 'starting' ||
-          conversation.state === 'waiting_for_agent') &&
-          ' Checked every minute; kept alive with 10 minutes remaining.'}
       </p>
       {messages.map((message) => (
         <article key={message.id}>
@@ -97,6 +94,8 @@ function App() {
   const [lifecycle, setLifecycle] = useState<{
     nextCheckAt: number;
     checking: boolean;
+    activeRuntimeMs: number;
+    checkIntervalMs: number;
   } | null>(null);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -142,6 +141,12 @@ function App() {
   return (
     <main>
       <h1>AI SDK experiment</h1>
+      {lifecycle && (
+        <p>
+          Active sandbox TTL: {lifecycle.activeRuntimeMs / 60_000} minutes.
+          Lifecycle checks every {lifecycle.checkIntervalMs / 1000} seconds.
+        </p>
+      )}
       {lifecycle && (
         <p>
           {lifecycle.checking

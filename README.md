@@ -64,10 +64,11 @@ The states are a small subset of the [Course agent MVP state machine](https://gi
 Normal path: `offline → starting → waiting_for_agent → waiting_for_user → offline`. A new message from `waiting_for_user` also enters `starting` for harness reattachment. Failures enter `error`. There are no approval, publishing, or sync states in this prototype. Vercel owns snapshotting; we don't invent a `suspending` transition we cannot observe. The background manager checks expired sandboxes with `resume: false` before reporting `offline`.
 
 ```dotenv
+SANDBOX_ACTIVE_MINUTES=10
 SANDBOX_IDLE_MINUTES=10
 ```
 
-The sandbox starts with a 10-minute TTL. Checks continue once per minute in all states. Active checks top up to 10 minutes remaining; they do not add 10 minutes on top of the existing deadline. Idle checks grant one final allowance, then only confirm expiration. With the default settings, an observed idle transition expires roughly 10–11 minutes after the turn ends.
+The sandbox starts with `SANDBOX_ACTIVE_MINUTES` of runtime (default 10, minimum 1). For a short experiment, set it to `1`; set `SANDBOX_IDLE_MINUTES=1` too if you want idle expiration after about one minute. Checks automatically use the smaller of 60 seconds or one-third of the active TTL, so a one-minute TTL gets checks every 20 seconds. Restart the server and create a new conversation after changing these values. Checks continue at that interval in all states. Active checks top up to the configured TTL; they do not add 10 minutes on top of the existing deadline. Idle checks grant one final allowance, then only confirm expiration. With the default settings, an observed idle transition expires roughly 10–11 minutes after the turn ends.
 
 The manager tracks only the previously observed state. Timing is approximate: a whole turn between checks can go unnoticed and keep the previous deadline. No transition timestamps or idle deadlines are maintained by the agent.
 
