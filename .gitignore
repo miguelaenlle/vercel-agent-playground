@@ -9,6 +9,8 @@ dist/
 test-results/
 playwright-report/
 .local/
+.vercel
+.env*
 /.swc
 
 .nitro/
