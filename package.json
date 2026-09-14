@@ -12,7 +12,9 @@
     "start": "tsx src/server.ts --production",
     "check": "tsc --noEmit",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "dev:lifecycle": "nitro dev --port 4312",
+    "build:lifecycle": "nitro build --preset vercel"
   },
   "dependencies": {
     "@ai-sdk/harness": "1.0.110",
@@ -24,6 +26,7 @@
     "express": "5.2.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "workflow": "4.8.8",
     "zod": "4.6.4"
   },
   "devDependencies": {
@@ -32,7 +35,9 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.1",
+    "nitro": "3.0.260903-beta",
     "prettier": "3.9.6",
+    "rollup": "4.63.2",
     "tsx": "4.23.13",
     "typescript": "7.0.2",
     "vite": "8.3.0"

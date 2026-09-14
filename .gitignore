@@ -9,3 +9,8 @@ dist/
 test-results/
 playwright-report/
 .local/
+/.swc
+
+.nitro/
+.output/
+.workflow-data/

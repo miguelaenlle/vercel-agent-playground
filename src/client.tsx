@@ -15,6 +15,11 @@ function Chat({
   setBusy: (busy: boolean) => void;
 }) {
   const [text, setText] = useState('');
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
   const [transport] = useState(
     () =>
       new DefaultChatTransport({
@@ -36,6 +41,16 @@ function Chat({
   return (
     <>
       <p>Chat status: {status}</p>
+      <p>
+        Sandbox: {conversation.sandboxState}.
+        {busy || conversation.sandboxState === 'active'
+          ? ' Idle timer paused while the agent is running (including thinking).'
+          : conversation.idleDeadline !== null
+            ? conversation.idleDeadline > now
+              ? ` Idle cleanup in ${Math.ceil((conversation.idleDeadline - now) / 1000)} seconds.`
+              : ' Idle limit reached; Workflow cleanup is due.'
+            : ''}
+      </p>
       {messages.map((message) => (
         <article key={message.id}>
           <strong>{message.role}</strong>
@@ -65,11 +80,17 @@ function Chat({
           disabled={busy}
           rows={3}
         />
-        <button disabled={busy || !text.trim()}>Send</button>
+        <button
+          disabled={
+            busy || !text.trim() || conversation.sandboxState === 'unavailable'
+          }
+        >
+          Send
+        </button>
       </form>
       {busy && <button onClick={() => void stop()}>Stop</button>}
       <p>
-        Codex session: {conversation.id}. Files stay in its sandbox between
+        Conversation: {conversation.id}. Files stay in its sandbox between
         turns.
       </p>
     </>
@@ -92,8 +113,10 @@ function App() {
     }
   }
   useEffect(() => {
-    // Load the server's in-memory conversations on page load.
+    // Polling reads status only; it never extends the sandbox's idle deadline.
     void refresh();
+    const timer = setInterval(() => void refresh(), 2000);
+    return () => clearInterval(timer);
   }, []);
 
   async function create() {
@@ -108,17 +131,6 @@ function App() {
     } catch (error) {
       setError((error as Error).message);
     }
-  }
-  async function remove() {
-    const response = await fetch(`/api/conversations/${id}`, {
-      method: 'DELETE',
-    });
-    if (!response.ok) {
-      setError('Could not delete conversation. Stop its turn first.');
-      return;
-    }
-    setId('');
-    await refresh();
   }
   const selected = conversations.find((conversation) => conversation.id === id);
   return (
@@ -140,11 +152,6 @@ function App() {
           </option>
         ))}
       </select>
-      {selected && (
-        <button onClick={() => void remove()} disabled={busy}>
-          Delete
-        </button>
-      )}
       {error && <p role="alert">{error}</p>}
       {selected && (
         <Chat

@@ -1,6 +1,6 @@
 import { HarnessAgent, HarnessError } from '@ai-sdk/harness/agent';
 import { createCodex } from '@ai-sdk/harness-codex';
-import { createVercelSandbox } from '@ai-sdk/sandbox-vercel';
+import { sandboxProvider } from './sandbox-provider.js';
 
 export function createSandboxAgent() {
   const {
@@ -24,19 +24,7 @@ export function createSandboxAgent() {
   return new HarnessAgent({
     harness: createCodex({ auth: { OPENAI_API_KEY } }),
     model: process.env.CODEX_MODEL || 'gpt-5.3-codex',
-    sandbox: createVercelSandbox({
-      runtime: 'node24',
-      ports: [4000],
-      timeout: 30 * 60 * 1000,
-      persistent: false,
-      ...(VERCEL_TOKEN && VERCEL_TEAM_ID && VERCEL_PROJECT_ID
-        ? {
-            token: VERCEL_TOKEN,
-            teamId: VERCEL_TEAM_ID,
-            projectId: VERCEL_PROJECT_ID,
-          }
-        : {}),
-    }),
+    sandbox: sandboxProvider(),
     sandboxConfig: { workDir: 'workspace' },
     instructions:
       'Work in the current workspace. Use your native file and shell tools to fulfill requests. Keep replies brief. When changing data, use data.json unless asked otherwise.',

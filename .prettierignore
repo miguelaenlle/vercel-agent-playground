@@ -4,3 +4,10 @@ pnpm-lock.yaml
 test-results
 playwright-report
 .env*
+
+.nitro
+.vercel
+.workflow-data
+
+.output
+.swc

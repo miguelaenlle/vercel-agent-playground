@@ -6,6 +6,7 @@ import {
   type HarnessAgentSession,
 } from '@ai-sdk/harness/agent';
 import { createSandboxAgent } from './sandbox.js';
+import { startLifecycle } from './lifecycle.js';
 import {
   consumeStream,
   createUIMessageStream,
@@ -20,17 +21,23 @@ import { z } from 'zod';
 export type Conversation = {
   id: string;
   messages: UIMessage[];
+  idleDeadline: number | null;
+  sandboxState: 'new' | 'active' | 'idle' | 'unavailable';
 };
 
 export function createApp() {
   const app = express();
   const conversations = new Map<string, Conversation>();
-  const running = new Map<string, AbortController>();
+  const running = new Map<
+    string,
+    { controller: AbortController; done: Promise<void> }
+  >();
   const sandboxes = new Map<
     string,
     {
       agent: ReturnType<typeof createSandboxAgent>;
       session: HarnessAgentSession;
+      lifecycle: Awaited<ReturnType<typeof startLifecycle>>;
     }
   >();
   app.use('/api', (req, res, next) => {
@@ -53,29 +60,34 @@ export function createApp() {
     const conversation: Conversation = {
       id: crypto.randomUUID(),
       messages: [],
+      idleDeadline: null,
+      sandboxState: 'new',
     };
     conversations.set(conversation.id, conversation);
     res.json(conversation);
-  });
-  app.delete('/api/conversations/:id', async (req, res) => {
-    if (running.has(req.params.id))
-      return res.status(409).send('Stop the turn before deleting.');
-    await sandboxes.get(req.params.id)?.session.destroy();
-    sandboxes.delete(req.params.id);
-    conversations.delete(req.params.id);
-    res.sendStatus(204);
   });
   app.post('/api/conversations/:id/chat', async (req, res) => {
     const conversation = conversations.get(req.params.id);
     if (!conversation) return res.status(404).send('Conversation not found.');
     if (running.has(conversation.id))
       return res.status(409).send('A turn is already running.');
+    if (conversation.sandboxState === 'unavailable')
+      return res
+        .status(409)
+        .send('Sandbox unavailable. Start a new conversation.');
     const controller = new AbortController();
-    running.set(conversation.id, controller);
+    let finish!: () => void;
+    running.set(conversation.id, {
+      controller,
+      done: new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+    });
     res.on('close', () => {
       if (!res.writableFinished) controller.abort();
     });
     let drain = Promise.resolve();
+    let failed = false;
     try {
       const message = z
         .object({
@@ -93,14 +105,25 @@ export function createApp() {
           execute: async ({ writer }) => {
             let runtime = sandboxes.get(conversation.id);
             if (!runtime) {
+              const sessionId = conversation.id;
               const agent = createSandboxAgent();
-              const session = await agent.createSession({
-                sessionId: conversation.id,
-                abortSignal: controller.signal,
-              });
-              runtime = { agent, session };
-              sandboxes.set(conversation.id, runtime);
+              const lifecycle = await startLifecycle(sessionId);
+              try {
+                const session = await agent.createSession({
+                  sessionId,
+                  abortSignal: controller.signal,
+                });
+                runtime = { agent, session, lifecycle };
+                sandboxes.set(conversation.id, runtime);
+              } catch (error) {
+                await lifecycle.activity(false);
+                throw error;
+              }
+            } else {
+              await runtime.lifecycle.activity(true);
             }
+            conversation.sandboxState = 'active';
+            conversation.idleDeadline = null;
             // The native session owns history; send only this turn's new text.
             const result = await runtime.agent.stream({
               session: runtime.session,
@@ -118,15 +141,34 @@ export function createApp() {
           onEnd: ({ messages }) => {
             conversation.messages = messages;
           },
-          onError: getHarnessErrorMessage,
+          onError: (error) => {
+            failed = true;
+            conversation.sandboxState = 'unavailable';
+            return getHarnessErrorMessage(error);
+          },
         }),
         consumeSseStream: ({ stream }) => {
           drain = consumeStream({ stream });
         },
       });
     } finally {
-      await drain;
-      running.delete(conversation.id);
+      try {
+        await drain;
+        const runtime = sandboxes.get(conversation.id);
+        if (runtime && !runtime.session.hasUnfinishedTurn()) {
+          const { idleDeadline } = await runtime.lifecycle.activity(false);
+          conversation.idleDeadline = idleDeadline;
+          conversation.sandboxState = failed ? 'unavailable' : 'idle';
+        } else if (runtime) {
+          // A disconnected stream alone does not prove the agent is idle.
+          conversation.sandboxState = 'unavailable';
+        }
+      } catch {
+        conversation.sandboxState = 'unavailable';
+      } finally {
+        running.delete(conversation.id);
+        finish();
+      }
     }
   });
   const errors: ErrorRequestHandler = (_error, _req, res, _next) => {
@@ -140,10 +182,9 @@ export function createApp() {
   return {
     app,
     close: async () => {
-      for (const controller of running.values()) controller.abort();
-      await Promise.all(
-        [...sandboxes.values()].map(({ session }) => session.destroy()),
-      );
+      const turns = [...running.values()];
+      for (const { controller } of turns) controller.abort();
+      await Promise.all(turns.map(({ done }) => done));
     },
   };
 }
