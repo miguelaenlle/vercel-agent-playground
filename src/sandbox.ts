@@ -1,7 +1,19 @@
-import { HarnessAgent, HarnessError } from '@ai-sdk/harness/agent';
+import {
+  HarnessAgent,
+  HarnessError,
+  type HarnessAgentSession,
+  type HarnessAgentResumeSessionState,
+} from '@ai-sdk/harness/agent';
 import { createCodex } from '@ai-sdk/harness-codex';
 import { createVercelSandbox } from '@ai-sdk/sandbox-vercel';
 import { Sandbox } from '@vercel/sandbox';
+
+export const ACTIVE_RUNTIME_MS = 3 * 60_000;
+
+export type SandboxRuntime = Awaited<ReturnType<typeof createSandboxAgent>> & {
+  session?: HarnessAgentSession;
+  resumeFrom?: HarnessAgentResumeSessionState;
+};
 
 export async function createSandboxAgent(sessionId: string) {
   const {
@@ -26,7 +38,7 @@ export async function createSandboxAgent(sessionId: string) {
     name: sessionId,
     runtime: 'node24',
     ports: [4000],
-    timeout: 3 * 60_000,
+    timeout: ACTIVE_RUNTIME_MS,
     persistent: true,
     keepLastSnapshots: { count: 1 },
     ...sandboxCredentials(),

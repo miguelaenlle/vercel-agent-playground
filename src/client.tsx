@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
-import type { Conversation } from './server.js';
+import type { Conversation } from './conversation.js';
 import './style.css';
 
 function Chat({

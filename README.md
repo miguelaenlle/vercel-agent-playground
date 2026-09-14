@@ -78,7 +78,9 @@ Vercel owns filesystem snapshots (`persistent: true`, keeping the latest snapsho
 ## Read the code
 
 - [`src/sandbox.ts`](src/sandbox.ts): create a persistent native `Sandbox`, then give it to the standard Codex harness through `createVercelSandbox({ sandbox })`.
-- [`src/server.ts`](src/server.ts): chat routes, in-memory sessions, and agent-owned state transitions.
+- [`src/server.ts`](src/server.ts): HTTP routes, in-memory maps, and shutdown.
+- [`src/chat.ts`](src/chat.ts): resume → stream → drain → save the harness session; owns conversation state transitions.
+- [`src/conversation.ts`](src/conversation.ts): the shared conversation shape.
 - [`src/sandbox-lifecycle.ts`](src/sandbox-lifecycle.ts): background timeout policy and confirmation that idle sandboxes stopped.
 - [`src/client.tsx`](src/client.tsx): `useChat`, raw SDK message parts, and runtime countdown.
 
