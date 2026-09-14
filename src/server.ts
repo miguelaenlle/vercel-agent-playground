@@ -19,7 +19,7 @@ export function createApp() {
   >();
   const liveSandboxes = new Map<string, SandboxRuntime>();
 
-  const stopLifecycle = startSandboxLifecycle(
+  const lifecycle = startSandboxLifecycle(
     conversations,
     liveSandboxes,
     (id, error) => {
@@ -42,7 +42,10 @@ export function createApp() {
   });
   app.use(express.json({ limit: '1mb' }));
   app.get('/api/conversations', (_req, res) =>
-    res.json([...conversations.values()]),
+    res.json({
+      conversations: [...conversations.values()],
+      lifecycle: lifecycle.getStatus(),
+    }),
   );
   app.post('/api/conversations', (_req, res) => {
     const conversation: Conversation = {
@@ -109,7 +112,7 @@ export function createApp() {
   return {
     app,
     close: async () => {
-      stopLifecycle();
+      lifecycle.stop();
       const turns = [...running.values()];
       for (const { controller } of turns) controller.abort();
       await Promise.all(turns.map(({ done }) => done));

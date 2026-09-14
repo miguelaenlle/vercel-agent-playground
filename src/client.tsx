@@ -7,19 +7,16 @@ import './style.css';
 
 function Chat({
   conversation,
+  now,
   refresh,
   setBusy,
 }: {
   conversation: Conversation;
+  now: number;
   refresh: () => Promise<void>;
   setBusy: (busy: boolean) => void;
 }) {
   const [text, setText] = useState('');
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
   const [transport] = useState(
     () =>
       new DefaultChatTransport({
@@ -45,13 +42,11 @@ function Chat({
         Conversation state: {conversation.state}.
         {conversation.expiresAt !== null &&
           (conversation.expiresAt > now
-            ? ` Runtime remaining: ${Math.ceil((conversation.expiresAt - now) / 1000)} seconds.`
-            : ' Runtime deadline reached. Send a message to resume from saved files.')}
+            ? ` Sandbox time remaining: ${Math.ceil((conversation.expiresAt - now) / 1000)} seconds.`
+            : ' Sandbox deadline reached. Send a message to resume from saved files.')}
         {(conversation.state === 'starting' ||
           conversation.state === 'waiting_for_agent') &&
           ' Checked every minute; kept alive with 10 minutes remaining.'}
-        {conversation.state === 'waiting_for_user' &&
-          ' One final idle allowance, then no further renewals.'}
       </p>
       {messages.map((message) => (
         <article key={message.id}>
@@ -98,6 +93,15 @@ function Chat({
 }
 
 function App() {
+  const [now, setNow] = useState(Date.now());
+  const [lifecycle, setLifecycle] = useState<{
+    nextCheckAt: number;
+    checking: boolean;
+  } | null>(null);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [id, setId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -107,7 +111,9 @@ function App() {
     try {
       const response = await fetch('/api/conversations');
       if (!response.ok) throw new Error('Could not load conversations.');
-      setConversations(await response.json());
+      const data = await response.json();
+      setConversations(data.conversations);
+      setLifecycle(data.lifecycle);
     } catch (error) {
       setError((error as Error).message);
     }
@@ -136,6 +142,13 @@ function App() {
   return (
     <main>
       <h1>AI SDK experiment</h1>
+      {lifecycle && (
+        <p>
+          {lifecycle.checking
+            ? 'Lifecycle check running…'
+            : `Next lifecycle check in ${Math.max(0, Math.ceil((lifecycle.nextCheckAt - now) / 1000))} seconds.`}
+        </p>
+      )}
       <button onClick={() => void create()} disabled={busy}>
         New conversation
       </button>{' '}
@@ -157,6 +170,7 @@ function App() {
         <Chat
           key={id}
           conversation={selected}
+          now={now}
           refresh={refresh}
           setBusy={setBusy}
         />

@@ -20,6 +20,7 @@ export function startSandboxLifecycle(
   const previousStates = new Map<string, Conversation['state']>();
   let checking = false;
   let stopped = false;
+  let nextCheckAt = Date.now() + CHECK_INTERVAL_MS;
 
   async function checkSandbox(id: string, sandbox: Sandbox) {
     const conversation = conversations.get(id)!;
@@ -97,10 +98,16 @@ export function startSandboxLifecycle(
     }
   }
 
-  const timer = setInterval(() => void checkAllSandboxes(), CHECK_INTERVAL_MS);
+  const timer = setInterval(() => {
+    nextCheckAt = Date.now() + CHECK_INTERVAL_MS;
+    void checkAllSandboxes();
+  }, CHECK_INTERVAL_MS);
   timer.unref();
-  return () => {
-    stopped = true;
-    clearInterval(timer);
+  return {
+    getStatus: () => ({ nextCheckAt, checking }),
+    stop: () => {
+      stopped = true;
+      clearInterval(timer);
+    },
   };
 }
