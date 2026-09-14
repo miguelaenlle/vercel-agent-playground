@@ -62,7 +62,8 @@ export function createApp() {
         if (!deadline || deadline <= Date.now())
           throw new Error('Sandbox runtime expired.');
         const extension = Math.ceil(Date.now() + duration - deadline);
-        if (extension > 0)
+        // Vercel rejects extensions shorter than one second.
+        if (extension >= 1000)
           await runtime.sandbox.extendTimeout(extension, {
             signal: AbortSignal.timeout(15_000),
           });
