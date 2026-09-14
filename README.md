@@ -1,81 +1,58 @@
-# Vercel agent playground
+# AI SDK experiment
 
-A small React + Express application for trying Vercel's AI SDK before adding managed sandboxes and adapting the workflow to PrairieLearn.
+Minimal React + Express example: streaming chat, conversations, and two agent tools that save/read notes in server memory. Uses OpenAI directly; no AI Gateway or Vercel credentials needed for phase 1.
 
-**Phase 1 is implemented:** streaming chat, an agent with two real tools, multiple conversations, and an inspector for conversation-specific notes. Model requests go directly to OpenAI. **AI Gateway and Vercel credentials are not required.**
+## Run
 
-## Run locally
-
-Requires Node.js 22.12+ and pnpm 11.
+Requires Node 22.12+ and pnpm 11.
 
 ```sh
 pnpm install
-cp .env.example .env.local
+cp .env.example .env.local  # Only if .env.local does not already exist.
 # Set OPENAI_API_KEY in .env.local.
 pnpm dev
 ```
 
-Open <http://localhost:4310>. Create an [OpenAI API key](https://platform.openai.com/api-keys) with API billing enabled; a ChatGPT subscription alone does not provide API credits. Keep the key in `.env.local`, which Git ignores. Restart the server after changing this file.
+Open <http://localhost:4310>. The key needs OpenAI API billing. `OPENAI_MODEL` defaults to `gpt-4.1-mini`. Restart after changing `.env.local`.
 
-The default model is `gpt-4.1-mini`. Set `OPENAI_MODEL` to another tool-capable OpenAI model available to your key, or `PORT` to change the local port. The application shows setup instructions when the key is missing and a visible error if the provider rejects a request. It never falls back to fake replies.
+1. Click **New conversation** and send **Save my project name as Prairie.**
+2. Inspect the `tool-saveNote` message part and **Server notes** JSON.
+3. Send **Read my notes.**
+4. Create another conversation: its notes are empty. Use the dropdown to return to the first one.
 
-For a production frontend build, run `pnpm build` followed by `pnpm start`. This is still a local, single-user playground; it binds to the loopback interface and has no login system.
+## Read the code
 
-## Try it
+- [`src/server.ts`](src/server.ts): Express, in-memory `Map`, `ToolLoopAgent`, two tools, and `pipeAgentUIStreamToResponse`. Startup is at the bottom.
+- [`src/client.tsx`](src/client.tsx): conversation selector and `useChat` with `DefaultChatTransport`. Text is plain text; tool parts are printed as JSON.
+- [`src/style.css`](src/style.css): basic readability only.
 
-1. Create a conversation and ask: **Save my project name as Prairie.**
-2. Expand the `saveNote` activity to see its input and result. The note appears in the inspector when the turn finishes.
-3. Ask: **Read my notes. What is my project name?** Watch `readNotes` run.
-4. Create another conversation. It starts with empty notes. Return to the first conversation or reload the page to see its saved transcript and notes.
-5. Try Stop during generation, then send a follow-up. Delete removes the conversation and its data.
-
-Everything lives in an Express `Map`. Restarting the server clears it. Reloading during generation interrupts that turn; there is no reconnect/replay or restart recovery. Completed tool changes remain after Stop. One turn can run at a time across the playground.
-
-## Who owns what?
-
-| Surface                                                            | Owner                                                           |
-| ------------------------------------------------------------------ | --------------------------------------------------------------- |
-| Agent loop and tool execution                                      | AI SDK `ToolLoopAgent`                                          |
-| Model API integration                                              | `@ai-sdk/openai`, direct OpenAI credentials                     |
-| Streaming protocol and React chat state                            | AI SDK stream helpers, `DefaultChatTransport`, `useChat`        |
-| Conversation identity, history, notes, limits, cancellation policy | This Express application                                        |
-| `saveNote` and `readNotes` behavior                                | Two small application tools, scoped to the current conversation |
-| UI and data inspector                                              | This React application                                          |
-| Sandboxes, course setup, durable hosting                           | Later phases                                                    |
-
-Express accepts only a new user message and builds model input from server-owned history. Stable message IDs prevent duplicate submissions. There are no custom event parsers, token buffers, stream replay stores, or agent runners.
-
-Runs are limited to 6 model steps and 90 seconds, with no automatic provider retries. Notes and messages have size/count limits. These are demo bounds, not a billing budget: each turn makes real, billable API calls, potentially one call per tool-loop step.
-
-## Code map
+The request path is:
 
 ```text
-src/server/index.ts     Environment, direct provider, Express + Vite startup
-src/server/app.ts       In-memory conversations, HTTP routes, SDK streaming
-src/server/agent.ts     Agent instructions and the two notes tools
-src/shared/types.ts    Conversation and configuration types
-src/client/App.tsx     Conversation navigation and data inspector
-src/client/Chat.tsx    useChat, Markdown messages, tool activity, composer
+useChat → DefaultChatTransport → Express → ToolLoopAgent → OpenAI
+                                             ↓
+                                     saveNote / readNotes
+                                             ↓
+                                      conversation.notes
 ```
 
-## Verify
+AI SDK owns the agent loop, tool execution, message validation/conversion, and streaming format. Express owns the conversation map and tool implementations. `onEnd` saves the SDK transcript; the client refreshes notes after each turn.
+
+This example follows the SDK's client-supplied message-history pattern. The server saves history for switching/reloading, but does not implement an authoritative message log, deduplication, or replay. It is a local single-user experiment, not a production backend. One turn per conversation may run at a time; turns are limited to six model steps and 90 seconds. Restarting clears all data. There is no persistence, stop/delete UI, auto-scroll, Markdown rendering, or recovery workflow. If a turn fails or is interrupted, start a new conversation.
+
+## Check
 
 ```sh
-pnpm check
+pnpm build
 pnpm test
 pnpm exec playwright install chromium
 pnpm test:e2e
-pnpm build
-pnpm format:check
 ```
 
-Integration tests inject an SDK mock model while exercising the real agent/tool/streaming code. They cover tool execution, isolation, server-held history, duplicate submissions, invalid input, missing configuration, cancellation, timeout, deletion, and cross-origin rejection. Browser tests cover chat and tool inspection, reload, separate conversations, stopping/deleting, mobile layout, and missing-key guidance. The test-only server is separate from the application; these tests need no credentials and make no paid model calls.
+Tests inject an SDK mock model, exercise the real tool loop, and check separate conversation data and history. They make no paid API calls. Run the walkthrough with your key to test live OpenAI access.
 
-Use the walkthrough above with your API key to validate live OpenAI access. Mock tests do not establish that a particular API key or model is available.
+## References / next phases
 
-## Next
-
-- **Phase 2:** standard Codex harness + one real Vercel Sandbox per conversation.
-- **Phase 3:** prepare the sandbox by cloning a fixed PrairieLearn test course, then edit and inspect PrairieLearn course code.
-
-See [PLAN.md](PLAN.md) for the full design and future credential/setup requirements. Vercel-managed sandbox execution starts in phase 2; Express owns orchestration and in-memory metadata in phase 1.
+- [AI SDK agents](https://ai-sdk.dev/docs/agents/building-agents)
+- [AI SDK chatbot](https://ai-sdk.dev/docs/ai-sdk-ui/chatbot)
+- [PLAN.md](PLAN.md): add the standard Codex harness and Vercel Sandbox, then prepare a fixed PrairieLearn course checkout.

@@ -6,7 +6,7 @@ The experiment tests how much agent infrastructure can be supplied by Vercel-mai
 
 React, TypeScript, and one Express server with in-memory conversations. AI SDK `ToolLoopAgent` runs two tools: `saveNote` and `readNotes`. The direct OpenAI provider handles model calls; SDK helpers stream messages to `useChat`.
 
-No AI Gateway, Vercel account, database, sandbox, or custom streaming protocol is required. The app owns conversation identity, retained messages, notes, run limits, and cancellation policy. See [README.md](README.md) for setup and experiments.
+No AI Gateway, Vercel account, database, sandbox, or custom streaming protocol is required. The app owns an in-memory conversation map, notes tools, and a per-conversation running guard. The client supplies message history; SDK helpers handle streaming. See [README.md](README.md) for setup and experiments.
 
 ## Phase 2: agent + chat + sandbox — planned
 
