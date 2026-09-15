@@ -62,12 +62,6 @@ export async function createSandboxAgent(sessionId: string) {
     });
   }
   const sandbox = await Sandbox.create({
-    source: {
-      type: 'git',
-      url: COURSE_REPO_URL,
-      username: 'x-access-token',
-      password: GITHUB_PAT,
-    },
     name: sessionId,
     runtime: 'node24',
     ports: [4000],
@@ -76,36 +70,26 @@ export async function createSandboxAgent(sessionId: string) {
     keepLastSnapshots: { count: 1 },
     ...sandboxCredentials(),
   });
-  // HarnessAgent requires a child directory; Vercel clones into the sandbox root.
-  const setup = await sandbox.runCommand({
-    cmd: 'node',
-    args: [
-      '-e',
-      `
-      const fs = require('node:fs');
-      const entries = fs.readdirSync('.');
-      const directory = fs.mkdtempSync('course-');
-      for (const entry of entries) fs.renameSync(entry, directory + '/' + entry);
-      const { execFileSync } = require('node:child_process');
-      execFileSync('git', ['remote', 'set-url', 'origin', process.argv[1]], { cwd: directory });
-      console.log(directory);
-    `,
-      COURSE_REPO_URL,
-    ],
+  const provider = withGitAuth(
+    createVercelSandbox({ sandbox }),
+    COURSE_REPO_URL,
+    GITHUB_PAT,
+  );
+  // Install Git credentials at the network boundary before the initial clone.
+  const session = await provider.createSession();
+  await session.addRequestTransformations!([]);
+  const clone = await sandbox.runCommand({
+    cmd: 'git',
+    args: ['clone', COURSE_REPO_URL, 'course'],
   });
-  if (setup.exitCode !== 0) {
-    throw new HarnessError({ message: 'Preparing course directory failed.' });
+  if (clone.exitCode !== 0) {
+    throw new HarnessError({ message: 'Cloning course repository failed.' });
   }
-  const workDir = (await setup.stdout()).trim();
   const agent = new HarnessAgent({
     harness: createCodex({ auth: { OPENAI_API_KEY }, webSearch: true }),
     model: process.env.CODEX_MODEL || undefined,
-    sandbox: withGitAuth(
-      createVercelSandbox({ sandbox }),
-      COURSE_REPO_URL,
-      GITHUB_PAT,
-    ),
-    sandboxConfig: { workDir },
+    sandbox: provider,
+    sandboxConfig: { workDir: 'course' },
     tools: {
       hostPing: tool({
         description: 'Ping the Express server and get its current time.',
