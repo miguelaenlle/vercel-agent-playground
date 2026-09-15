@@ -90,7 +90,7 @@ export async function createSandboxAgent(sessionId: string) {
   const workDir = (await setup.stdout()).trim();
   const agent = new HarnessAgent({
     harness: createCodex({ auth: { OPENAI_API_KEY }, webSearch: true }),
-    model: process.env.CODEX_MODEL || 'gpt-5.3-codex',
+    model: process.env.CODEX_MODEL || undefined,
     sandbox: withGitAuth(
       createVercelSandbox({ sandbox }),
       COURSE_REPO_URL,
