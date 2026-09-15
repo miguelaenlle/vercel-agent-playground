@@ -12,25 +12,28 @@ export function withGitAuth(
   const repo = new URL(repoUrl);
   // The repository URL is validated before sandbox creation.
   const path = repo.pathname;
-  // Vercel injects this header outside the VM; the agent never receives the PAT.
+  // Vercel adds the PAT outside the sandbox.
   const headers = {
     Authorization: `Basic ${Buffer.from(`x-access-token:${pat}`).toString('base64')}`,
   };
-  // These rules add credentials to Git reads; they do not restrict other traffic.
+  // Clone, fetch, and pull use these two HTTPS requests.
+  // Only this repository gets the PAT. Other internet traffic stays allowed.
+  // Push uses git-receive-pack, which we deliberately do not authenticate.
   const rules: HarnessV1RequestTransformation[] = [
-    // Discover refs for a fetch/pull, excluding the push (git-receive-pack) service.
+    // 1. GET: discover available branches and commits.
     {
       match: {
         host: repo.hostname,
         path: { exact: `${path}/info/refs` },
         method: ['GET'],
+        // This endpoint also serves pushes; match only the read service.
         queryString: [
           { key: { exact: 'service' }, value: { exact: 'git-upload-pack' } },
         ],
       },
       transform: { headers },
     },
-    // Download the Git objects needed by the fetch/pull.
+    // 2. POST: request and download missing commits/files (despite "upload" in the name).
     {
       match: {
         host: repo.hostname,
@@ -40,17 +43,17 @@ export function withGitAuth(
       transform: { headers },
     },
   ];
-  // Combine our rules with the OpenAI rules installed by the Codex adapter.
+  // Keep Git auth alongside the adapter's OpenAI auth.
   function attach(session: HarnessV1NetworkSandboxSession) {
     const add = session.addRequestTransformations!.bind(session);
-    // Supply both credentials together: Vercel redacts existing rules on resume.
+    // On resume, redacted credentials must be supplied again.
     return Object.assign(session, {
       addRequestTransformations: (
         transformations: ReadonlyArray<HarnessV1RequestTransformation>,
       ) => add([...transformations, ...rules]),
     });
   }
-  // Install the wrapper for fresh sessions and sessions restored from persistence.
+  // Apply on both creation and resume.
   return {
     specificationVersion: provider.specificationVersion,
     providerId: provider.providerId,
