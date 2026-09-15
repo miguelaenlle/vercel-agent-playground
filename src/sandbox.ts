@@ -52,6 +52,15 @@ export async function createSandboxAgent(sessionId: string) {
       message: 'Set COURSE_REPO_URL and GITHUB_PAT in .env.local.',
     });
   }
+  if (
+    !/^https:\/\/github\.com\/[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+\.git$/.test(
+      COURSE_REPO_URL,
+    )
+  ) {
+    throw new HarnessError({
+      message: 'COURSE_REPO_URL must be https://github.com/OWNER/REPO.git.',
+    });
+  }
   const sandbox = await Sandbox.create({
     source: {
       type: 'git',
@@ -81,7 +90,7 @@ export async function createSandboxAgent(sessionId: string) {
       execFileSync('git', ['remote', 'set-url', 'origin', process.argv[1]], { cwd: directory });
       console.log(directory);
     `,
-      COURSE_REPO_URL.replace(/\.git$/, '') + '.git',
+      COURSE_REPO_URL,
     ],
   });
   if (setup.exitCode !== 0) {

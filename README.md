@@ -40,7 +40,7 @@ COURSE_REPO_URL=https://github.com/your-org/your-course.git
 GITHUB_PAT=...
 ```
 
-Use a fine-grained PAT scoped to that repository with **Contents: Read**. Restart Express after changing configuration, then create a new conversation. `Sandbox.create({ source })` clones the default branch before Codex starts. Setup moves the checkout (including `.git`) into a child directory because the harness requires a relative working directory. The harness works in that checkout. Subsequent turns and sandbox resumes reuse the checkout, preserving edits. Clone failures fail setup before starting Codex. No dependency installation or PrairieLearn server setup is performed.
+The URL must have the form `https://github.com/OWNER/REPO.git`, including `.git`. Invalid URLs fail before sandbox creation. Use a fine-grained PAT scoped to that repository with **Contents: Read**. Restart Express after changing configuration, then create a new conversation. `Sandbox.create({ source })` clones the default branch before Codex starts. Setup moves the checkout (including `.git`) into a child directory because the harness requires a relative working directory. The harness works in that checkout. Subsequent turns and sandbox resumes reuse the checkout, preserving edits. Clone failures fail setup before starting Codex. No dependency installation or PrairieLearn server setup is performed.
 
 Try **List the course questions, then make a small wording change to one question and show the Git diff.** The PAT is supplied to Vercel's git source API, not embedded in a clone command or supplied as an agent environment variable.
 

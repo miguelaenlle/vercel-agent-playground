@@ -10,15 +10,8 @@ export function withGitAuth(
   pat: string,
 ): HarnessV1SandboxProvider {
   const repo = new URL(repoUrl);
-  // Accept only a plain https://github.com/OWNER/REPO URL, with optional .git.
-  const isGitHub = repo.origin === 'https://github.com';
-  const isRepositoryPath = /^\/[^/]+\/[^/]+$/.test(repo.pathname);
-  const hasExtras = repo.username || repo.password || repo.search || repo.hash;
-  if (!isGitHub || !isRepositoryPath || hasExtras) {
-    throw new Error('COURSE_REPO_URL must be an HTTPS GitHub repository URL.');
-  }
-  // Git uses the .git URL for both repository discovery and fetching objects.
-  const path = repo.pathname.replace(/\.git$/, '') + '.git';
+  // The repository URL is validated before sandbox creation.
+  const path = repo.pathname;
   // Vercel injects this header outside the VM; the agent never receives the PAT.
   const headers = {
     Authorization: `Basic ${Buffer.from(`x-access-token:${pat}`).toString('base64')}`,
