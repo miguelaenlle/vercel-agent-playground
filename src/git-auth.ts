@@ -18,7 +18,9 @@ export function withGitAuth(
   };
   // Clone, fetch, and pull use these two HTTPS requests.
   // Only this repository gets the PAT. Other internet traffic stays allowed.
-  // Push uses git-receive-pack, which we deliberately do not authenticate.
+  // Push uses GET info/refs?service=git-receive-pack + POST git-receive-pack.
+  // Neither matches these rules, so pushes receive no PAT (traffic is not blocked).
+  // Keep the PAT read-only too, so GitHub independently rejects writes.
   const rules: HarnessV1RequestTransformation[] = [
     // 1. GET: discover available branches and commits.
     {
